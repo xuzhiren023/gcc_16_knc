@@ -430,7 +430,7 @@ fido-*-*)
 	extra_headers=math-68881.h
 	extra_options="${extra_options} m68k/m68k-tables.opt"
         ;;
-i[34567]86-*-* | x86_64-*-*)
+i[34567]86-*-* | x86_64-*-* | k1om-*-linux*)
 	cpu_type=i386
 	c_target_objs="i386-c.o"
 	cxx_target_objs="i386-c.o"
@@ -688,7 +688,7 @@ i[34567]86-*-*)
 	;;
 x86_64-*-darwin*)
 	;;
-x86_64-*-*)
+x86_64-*-* | k1om-*-linux*)
         # Pick a default with_abi and with_multilib_list for m32
         # restricted toolchains
         case ${target} in
@@ -2120,11 +2120,11 @@ i[34567]86-*-linux* | i[34567]86-*-kfreebsd*-gnu | i[34567]86-*-gnu* | i[34567]8
 		;;
 	esac
 	;;
-x86_64-*-linux* | x86_64-*-kfreebsd*-gnu | x86_64-*-gnu*)
+x86_64-*-linux* | x86_64-*-kfreebsd*-gnu | x86_64-*-gnu* | k1om-*-linux*)
 	tm_file="${tm_file} i386/unix.h i386/att.h elfos.h gnu-user.h glibc-stdint.h \
 		 i386/x86-64.h i386/gnu-user-common.h i386/gnu-user64.h"
 	case ${target} in
-	x86_64-*-linux*)
+	x86_64-*-linux* | k1om-*-linux*)
 		tm_file="${tm_file} linux.h linux-android.h i386/linux-common.h i386/linux64.h"
 		extra_options="${extra_options} linux-android.opt"
 	  	;;
@@ -2133,6 +2133,11 @@ x86_64-*-linux* | x86_64-*-kfreebsd*-gnu | x86_64-*-gnu*)
 		;;
 	x86_64-*-gnu*)
 		tm_file="${tm_file} gnu.h i386/gnu64.h"
+		;;
+	esac
+	case ${target} in
+	k1om-*-linux*)
+		tm_file="${tm_file} i386/linux-k1om.h"
 		;;
 	esac
 	tmake_file="${tmake_file} i386/t-linux64"
@@ -3716,7 +3721,7 @@ m32c-*-elf*)
 esac
 
 case ${target} in
-i[34567]86-*-linux* | x86_64-*-linux*)
+i[34567]86-*-linux* | x86_64-*-linux* | k1om-*-linux*)
 	tmake_file="${tmake_file} i386/t-pmm_malloc i386/t-i386"
 	;;
 i[34567]86-*-* | x86_64-*-*)
@@ -4030,7 +4035,7 @@ case ${target} in
 	;;
     esac
     ;;
-  x86_64-*-*)
+  x86_64-*-* | k1om-*-linux*)
     case ${target_noncanonical} in
       znver1-*)
 	arch=znver1
@@ -4155,7 +4160,7 @@ if test x$with_cpu = x ; then
     i[34567]86-*-elfiamcu)
       with_cpu=lakemont
       ;;
-    i[34567]86-*-*|x86_64-*-*)
+    i[34567]86-*-*|x86_64-*-*|k1om-*-linux*)
       with_cpu=$cpu
       ;;
     alphaev6[78]*-*-*)
@@ -4255,7 +4260,7 @@ if test x$with_arch = x ; then
 	with_arch=pentium4
       fi
       ;;
-    x86_64-*-*)
+    x86_64-*-* | k1om-*-linux*)
       with_arch=$arch
       ;;
     mips64r5900-*-* | mips64r5900el-*-* | mipsr5900-*-* | mipsr5900el-*-*)
@@ -4784,7 +4789,7 @@ case "${target}" in
 		esac
 		;;
 
-	i[34567]86-*-* | x86_64-*-*)
+	i[34567]86-*-* | x86_64-*-* | k1om-*-linux*)
 		supported_defaults="abi arch arch_32 arch_64 cpu cpu_32 cpu_64 tune tune_32 tune_64 tls"
 		for which in arch arch_32 arch_64 cpu cpu_32 cpu_64 tune tune_32 tune_64; do
 			eval "val=\$with_$which"
@@ -6078,7 +6083,7 @@ esac
 
 case ${target} in
 aarch64*-*-* | arm*-*-* | i[34567]86-*-* | mips*-*-* | powerpc*-*-* | sh*-*-* \
-| sparc*-*-* | x86_64-*-*)
+| sparc*-*-* | x86_64-*-* | k1om-*-linux*)
 	tm_file="vxworks-dummy.h ${tm_file}"
 	;;
 esac
@@ -6120,7 +6125,7 @@ case ${target} in
 
 	i[34567]86-*-darwin* | x86_64-*-darwin*)
 		;;
-	i[34567]86-*-linux* | x86_64-*-linux*)
+	i[34567]86-*-linux* | x86_64-*-linux* | k1om-*-linux*)
 		extra_objs="${extra_objs} gnu-property.o"
 		tmake_file="$tmake_file i386/t-linux i386/t-gnu-property"
 		;;
