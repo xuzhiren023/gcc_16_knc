@@ -128,6 +128,7 @@ case ${host} in
   | x86_64-*-* )
     case ${target} in
       i[34567]86-*-* \
+      | k1om-*-linux* \
       | x86_64-*-* )
 	host_extra_gcc_objs="driver-i386.o"
 	host_xmake_file="${host_xmake_file} i386/x-i386"
