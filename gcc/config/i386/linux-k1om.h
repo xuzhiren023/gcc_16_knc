@@ -33,3 +33,11 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
 
 #undef TARGET_SUBTARGET64_ISA_DEFAULT
 #define TARGET_SUBTARGET64_ISA_DEFAULT 0
+
+/* The driver otherwise injects its configured x86-64/generic defaults
+   before SUBSUBTARGET_OVERRIDE_OPTIONS can select KNC.  */
+#undef OPTION_DEFAULT_SPECS
+#define OPTION_DEFAULT_SPECS \
+  {"cpu", "%{!mtune=*:%{!mcpu=*:%{!march=*:-mtune=knc}}}"}, \
+  {"arch", "%{!march=*:-march=knc}"}, \
+  {"tls", "%{!mtls-dialect=*:-mtls-dialect=%(VALUE)}"},

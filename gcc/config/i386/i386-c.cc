@@ -49,6 +49,8 @@ ix86_target_macros_internal (HOST_WIDE_INT isa_flag,
       def_or_undef (parse_in, "__KNC__");
       def_or_undef (parse_in, "__k1om__");
       def_or_undef (parse_in, "__k1om");
+      /* KNC shares generic costs, but has no generic x86 arch macro.  */
+      arch = PROCESSOR_max;
     }
 
   /* For some of the k6/pentium varients there weren't separate ISA bits to
