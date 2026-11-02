@@ -22,6 +22,14 @@ a copy of the GCC Runtime Library Exception along with this program;
 see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
 <http://www.gnu.org/licenses/>.  */
 
-/* The initial port uses the x86-64 GNU/Linux headers.  KNC ISA defaults
-   and assembler/linker specs are supplied by subsequent port changes;
-   the donor counterpart is config/i386/linuxk1om.h.  */
+/* Select KNC before the common option handler derives the default tune.
+   Reference: donor config/i386/linuxk1om.h; ISA separation: ADR-0002.  */
+#undef SUBSUBTARGET_OVERRIDE_OPTIONS
+#define SUBSUBTARGET_OVERRIDE_OPTIONS \
+  do { \
+    if (!opts->x_ix86_arch_string) \
+      opts->x_ix86_arch_string = "knc"; \
+  } while (0)
+
+#undef TARGET_SUBTARGET64_ISA_DEFAULT
+#define TARGET_SUBTARGET64_ISA_DEFAULT 0
