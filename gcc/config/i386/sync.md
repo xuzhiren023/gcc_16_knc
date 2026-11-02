@@ -95,7 +95,7 @@
 (define_insn "mfence_sse2"
   [(set (match_operand:BLK 0)
 	(unspec:BLK [(match_dup 0)] UNSPEC_MFENCE))]
-  "TARGET_64BIT || TARGET_SSE2"
+  "!TARGET_KNC && (TARGET_64BIT || TARGET_SSE2)"
   "mfence"
   [(set_attr "type" "sse")
    (set_attr "length_address" "0")
@@ -128,7 +128,7 @@
       rtx (*mfence_insn)(rtx);
       rtx mem;
 
-      if ((TARGET_64BIT || TARGET_SSE2)
+      if (!TARGET_KNC && (TARGET_64BIT || TARGET_SSE2)
 	  && (optimize_function_for_size_p (cfun)
 	      || !TARGET_AVOID_MFENCE))
 	mfence_insn = gen_mfence_sse2;

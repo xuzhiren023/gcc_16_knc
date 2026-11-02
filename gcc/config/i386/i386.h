@@ -531,7 +531,8 @@ extern unsigned char ix86_arch_features[X86_ARCH_LAST];
 /* Keep the independent ISA name alongside the generated TARGET_KNC flag.  */
 #define TARGET_ISA_KNC TARGET_KNC
 
-#define TARGET_CMOV		ix86_arch_features[X86_ARCH_CMOV]
+/* KNC omits both integer CMOV and the FCOMI/FCMOV family.  */
+#define TARGET_CMOV		(!TARGET_KNC && ix86_arch_features[X86_ARCH_CMOV])
 #define TARGET_CMPXCHG		ix86_arch_features[X86_ARCH_CMPXCHG]
 #define TARGET_CMPXCHG8B	ix86_arch_features[X86_ARCH_CMPXCHG8B]
 #define TARGET_XADD		ix86_arch_features[X86_ARCH_XADD]
@@ -540,7 +541,8 @@ extern unsigned char ix86_arch_features[X86_ARCH_LAST];
 /* For sane SSE instruction set generation we need fcomi instruction.
    It is safe to enable all CMOVE instructions.  Also, RDRAND intrinsic
    expands to a sequence that includes conditional move. */
-#define TARGET_CMOVE		(TARGET_CMOV || TARGET_SSE || TARGET_RDRND)
+#define TARGET_CMOVE \
+  (!TARGET_KNC && (TARGET_CMOV || TARGET_SSE || TARGET_RDRND))
 
 #define TARGET_FISTTP		(TARGET_SSE3 && TARGET_80387)
 
