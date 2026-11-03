@@ -28,6 +28,8 @@ along with GCC; see the file COPYING3.  If not see
 #include "memmodel.h"
 #include "tm_p.h"
 #include "emit-rtl.h"
+#include "insn-config.h"
+#include "recog.h"
 #include "explow.h"
 #include "expr.h"
 #include "varasm.h"
@@ -90,5 +92,18 @@ ix86_knc_expand_packed_move (machine_mode mode, rtx *operands)
     operands[1] = validize_mem (force_const_mem (mode, operands[1]));
   if (MEM_P (operands[0]) && !REG_P (operands[1]))
     operands[1] = force_reg (mode, operands[1]);
+  rtx mem = MEM_P (operands[0]) ? operands[0] : operands[1];
+  if (MEM_P (mem) && MEM_ALIGN (mem) < 512)
+    {
+      /* S3-03 / Intel 327364-001: a full unmasked pair is safe for a
+         mapped 64-byte payload.  Keep one logical SET and derive A+64
+         from its MEM at output, so combine cannot separate the halves.
+         Legalize displacement overflow now, without an output scratch.  */
+      rtx addr = XEXP (mem, 0);
+      if (!memory_address_addr_space_p (mode, plus_constant (Pmode, addr, 64),
+                                        MEM_ADDR_SPACE (mem)))
+        operands[MEM_P (operands[0]) ? 0 : 1]
+          = replace_equiv_address (mem, force_reg (Pmode, addr));
+    }
   emit_insn (gen_rtx_SET (operands[0], operands[1]));
 }
