@@ -279,9 +279,14 @@
         (match_operand:KNC_PACKED 1 "nonimmediate_operand" "m,YJ"))
    (use (match_operand:DI 2 "address_operand" "p,p"))]
   "TARGET_KNC"
-  "@
-   vloadunpackl<knc_packed_pair>\t%1, %g0\;vloadunpackh<knc_packed_pair>\t%a2, %g0
-   vpackstorel<knc_packed_pair>\t%g1, %0\;vpackstoreh<knc_packed_pair>\t%g1, %a2"
+{
+  /* Preserve the memory address space, including any segment override.  */
+  rtx mem = MEM_P (operands[0]) ? operands[0] : operands[1];
+  operands[2] = replace_equiv_address_nv (mem, operands[2]);
+  if (which_alternative == 0)
+    return "vloadunpackl<knc_packed_pair>\t%1, %g0\n\tvloadunpackh<knc_packed_pair>\t%2, %g0";
+  return "vpackstorel<knc_packed_pair>\t%g1, %0\n\tvpackstoreh<knc_packed_pair>\t%g1, %2";
+}
   [(set_attr "type" "multi")
    (set_attr "memory" "load,store")
    (set_attr "length" "24")
