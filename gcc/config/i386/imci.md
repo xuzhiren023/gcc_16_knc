@@ -251,8 +251,8 @@
                                   "YJ,m,YJ,C"))]
   "TARGET_KNC && (register_operand (operands[0], <MODE>mode)
                   || register_operand (operands[1], <MODE>mode))
-   && (!MEM_P (operands[0]) || MEM_ALIGN (operands[0]) >= 512)
-   && (!MEM_P (operands[1]) || MEM_ALIGN (operands[1]) >= 512)"
+   && !misaligned_operand (operands[0], <MODE>mode)
+   && !misaligned_operand (operands[1], <MODE>mode)"
 {
   if (which_alternative == 3)
     return "vpxord\t%g0, %g0, %g0";
