@@ -1938,7 +1938,8 @@ init_cumulative_args (CUMULATIVE_ARGS *cum,  /* Argument info to initialize */
   if (TARGET_MMX)
     cum->mmx_nregs = MMX_REGPARM_MAX;
   cum->warn_avx512f = true;
-  cum->warn_avx = true;
+  /* KNC intentionally uses the memory ABI for 32-byte vectors.  */
+  cum->warn_avx = !TARGET_KNC;
   cum->warn_sse = true;
   cum->warn_mmx = true;
 
