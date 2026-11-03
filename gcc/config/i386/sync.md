@@ -421,17 +421,26 @@
    (TI "TARGET_64BIT && TARGET_CMPXCHG16B")])
 (define_mode_attr CASHMODE [(DI "SI") (TI "DI")])
 
+(define_mode_iterator CASMODE_EXPAND
+  [(DI "TARGET_64BIT || TARGET_CMPXCHG8B")
+   (TI "TARGET_64BIT && (TARGET_CMPXCHG16B || TARGET_KNC)")])
+
 (define_expand "atomic_compare_and_swap<mode>"
   [(match_operand:QI 0 "register_operand")	;; bool success output
-   (match_operand:CASMODE 1 "register_operand")	;; oldval output
-   (match_operand:CASMODE 2 "memory_operand")	;; memory
-   (match_operand:CASMODE 3 "register_operand")	;; expected input
-   (match_operand:CASMODE 4 "register_operand")	;; newval input
+   (match_operand:CASMODE_EXPAND 1 "register_operand") ;; oldval output
+   (match_operand:CASMODE_EXPAND 2 "memory_operand") ;; memory
+   (match_operand:CASMODE_EXPAND 3 "register_operand") ;; expected input
+   (match_operand:CASMODE_EXPAND 4 "register_operand") ;; newval input
    (match_operand:SI 5 "const_int_operand")	;; is_weak
    (match_operand:SI 6 "const_int_operand")	;; success model
    (match_operand:SI 7 "const_int_operand")]	;; failure model
   "TARGET_CMPXCHG"
 {
+  if (TARGET_KNC && <MODE>mode == TImode)
+    {
+      ix86_expand_knc_cas (operands);
+      DONE;
+    }
   int doubleword = !(<MODE>mode == DImode && TARGET_64BIT);
   if (TARGET_RELAX_CMPXCHG_LOOP)
   {
