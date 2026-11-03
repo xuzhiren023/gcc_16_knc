@@ -660,6 +660,10 @@ Optimize noreturn functions by not saving callee-saved registers used in the fun
 
 ;; ISA support
 
+mknc
+Target Undocumented Mask(ISA_KNC) Var(ix86_isa_flags) Save
+Select the independent Knights Corner instruction set.
+
 m32
 Target RejectNegative Negative(m64) InverseMask(ISA_64BIT) Var(ix86_isa_flags) Save
 Generate 32bit i386 code.
