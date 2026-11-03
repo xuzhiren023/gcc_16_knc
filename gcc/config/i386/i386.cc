@@ -4697,7 +4697,7 @@ setup_incoming_varargs_64 (CUMULATIVE_ARGS *cum)
 
   /* FPR size of varargs save area.  We don't need it if we don't pass
      anything in SSE registers.  */
-  if (TARGET_SSE && cfun->va_list_fpr_size)
+  if ((TARGET_SSE || TARGET_KNC) && cfun->va_list_fpr_size)
     ix86_varargs_fpr_size = X86_64_SSE_REGPARM_MAX * 16;
   else
     ix86_varargs_fpr_size = 0;
@@ -4747,7 +4747,9 @@ setup_incoming_varargs_64 (CUMULATIVE_ARGS *cum)
 	 we used movdqa (i.e. TImode) instead?  Perhaps even better would
 	 be if we could determine the real mode of the data, via a hook
 	 into pass_stdarg.  Ignore all that for now.  */
-      smode = V4SFmode;
+      /* KNC keeps the donor's 16-byte slots through TI transport (ADR-0004).
+         The AL test above must precede the transport's scratch definitions.  */
+      smode = TARGET_KNC ? TImode : V4SFmode;
       if (crtl->stack_alignment_needed < GET_MODE_ALIGNMENT (smode))
 	crtl->stack_alignment_needed = GET_MODE_ALIGNMENT (smode);
 
@@ -4764,7 +4766,11 @@ setup_incoming_varargs_64 (CUMULATIVE_ARGS *cum)
 	  set_mem_alias_set (mem, set);
 	  set_mem_align (mem, GET_MODE_ALIGNMENT (smode));
 
-	  emit_move_insn (mem, gen_rtx_REG (smode, GET_SSE_REGNO (i)));
+	  rtx reg = gen_rtx_REG (smode, GET_SSE_REGNO (i));
+	  if (TARGET_KNC)
+	    emit_insn (gen_knc_save_varargs (mem, reg));
+	  else
+	    emit_move_insn (mem, reg);
 	}
 
       emit_label (label);
@@ -4937,7 +4943,7 @@ ix86_va_start (tree valist, rtx nextarg)
       expand_expr (t, const0_rtx, VOIDmode, EXPAND_NORMAL);
     }
 
-  if (TARGET_SSE && cfun->va_list_fpr_size)
+  if ((TARGET_SSE || TARGET_KNC) && cfun->va_list_fpr_size)
     {
       type = TREE_TYPE (fpr);
       t = build2 (MODIFY_EXPR, type, fpr,
