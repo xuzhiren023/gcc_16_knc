@@ -34,6 +34,22 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
 #undef TARGET_SUBTARGET64_ISA_DEFAULT
 #define TARGET_SUBTARGET64_ISA_DEFAULT 0
 
+/* Donor config/i386/linuxk1om.h uses x87 precision with 16-byte storage,
+   not IEEE binary128 long double.  */
+#undef TARGET_SUBTARGET64_DEFAULT
+#define TARGET_SUBTARGET64_DEFAULT MASK_128BIT_LONG_DOUBLE
+
+/* Keep GCC 16's GNU/Linux link policy, selecting the donor's K1OM ABI
+   through the emulation and interpreter hooks in linux64.h/gnu-user64.h.  */
+#undef GNU_USER_LINK_EMULATION64
+#define GNU_USER_LINK_EMULATION64 "elf_k1om"
+
+#undef GLIBC_DYNAMIC_LINKER64
+#define GLIBC_DYNAMIC_LINKER64 "/lib64/ld-linux-k1om.so.2"
+
+#undef ASM_SPEC
+#define ASM_SPEC "%{" SPEC_32 ":--32} %{" SPEC_64 ":--march=k1om}"
+
 /* Match the donor's debug format for the card's debugger.  */
 #undef DWARF_VERSION_DEFAULT
 #define DWARF_VERSION_DEFAULT 4
