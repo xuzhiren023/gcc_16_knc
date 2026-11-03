@@ -1,0 +1,13 @@
+# KNC uses the generic integer and binary128 soft-fp implementations, with
+# its own register ABI.  Do not include i386/t-softfp: its HF/BF helpers
+# explicitly enable SSE2.  Reference: i386/t-softfp and t-softfp-tf.
+LIB2ADD += $(srcdir)/config/i386/sfp-exceptions.c
+LIB2FUNCS_EXCLUDE += _mulhc3 _divhc3
+
+# sfp-exceptions.c's non-SSE branch raises exceptions with x87 operations
+# and fnstenv/fldenv.  No SSE math flags are set for KNC.
+HOST_LIBGCC2_CFLAGS += -mlong-double-80
+
+# Only the static runtime is ported.  Keep Linux's PIC CRT and unwinder,
+# but do not build or advertise an unaudited shared libgcc.
+enable_shared := no
