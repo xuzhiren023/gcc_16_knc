@@ -9,7 +9,7 @@
 (define_mode_iterator KNC_PAIR [TI TF])
 (define_mode_attr knc_load [(SF "ss") (DF "sd") (SI "ss") (DI "sd")])
 (define_mode_attr knc_store
-  [(SF "ps") (DF "pd") (SI "ps") (DI "pd") (TI "pd") (TF "pd")])
+  [(SF "ps") (DF "pd") (SI "ps") (DI "pd") (TI "q") (TF "pd")])
 
 ;; Both the GPR materialization and mask definition have ordinary dataflow.
 (define_insn "knc_mask"
@@ -51,6 +51,21 @@
   "vpackstorel<knc_store>\t%g1, %0%{%2%}"
   [(set_attr "type" "ssemov")
    (set_attr "mode" "<MODE>")])
+
+;; SysV varargs slots are 16-byte aligned, so mask 3 saves both quadwords
+;; directly, as in donor setup_incoming_varargs_64 / knc.md (ADR-0004).
+(define_expand "knc_save_varargs"
+  [(set (match_operand:TI 0 "memory_operand")
+        (match_operand:TI 1 "register_operand"))]
+  "TARGET_KNC"
+{
+  rtx gpr = gen_reg_rtx (SImode);
+  rtx mask = gen_reg_rtx (HImode);
+  emit_move_insn (gpr, GEN_INT (3));
+  emit_insn (gen_knc_mask (mask, gen_lowpart (HImode, gpr)));
+  emit_insn (gen_knc_storeti (operands[0], operands[1], mask));
+  DONE;
+})
 
 (define_insn "knc_load<mode>"
   [(set (match_operand:KNC_BROADCAST 0 "register_operand" "=YJ")
