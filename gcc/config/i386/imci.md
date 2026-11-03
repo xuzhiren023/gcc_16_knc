@@ -268,26 +268,34 @@
 ;; Intel 327364-001, VLOADUNPACK / VPACKSTORE, and S3-03's card probe.
 ;; Both instructions share one logical 64-byte access.  The high half at
 ;; A+64 is a no-op when A is aligned; no mask or extra vector is needed.
-;; The explicit high address is allocated along with the low address.
+;; Derive the high address from the same MEM after allocation.
 ;; Mark the pair as multi and bound both instruction lengths, rather than
 ;; pretending this is a single aligned move.  Spills retain the insn above.
 (define_mode_attr knc_packed_pair
   [(V16SF "ps") (V8DF "pd") (V16SI "d") (V8DI "q")])
 
-(define_insn "*knc_packed_unaligned<mode>"
-  [(set (match_operand:KNC_PACKED 0 "nonimmediate_operand" "=YJ,m")
-        (match_operand:KNC_PACKED 1 "nonimmediate_operand" "m,YJ"))
-   (use (match_operand:DI 2 "address_operand" "p,p"))]
-  "TARGET_KNC"
+(define_insn "*knc_packed_unaligned_load<mode>"
+  [(set (match_operand:KNC_PACKED 0 "register_operand" "=YJ")
+        (match_operand:KNC_PACKED 1 "memory_operand" "m"))]
+  "TARGET_KNC && misaligned_operand (operands[1], <MODE>mode)"
 {
-  /* Preserve the memory address space, including any segment override.  */
-  rtx mem = MEM_P (operands[0]) ? operands[0] : operands[1];
-  operands[2] = replace_equiv_address_nv (mem, operands[2]);
-  if (which_alternative == 0)
-    return "vloadunpackl<knc_packed_pair>\t%1, %g0\n\tvloadunpackh<knc_packed_pair>\t%2, %g0";
+  operands[2] = adjust_address (operands[1], <MODE>mode, 64);
+  return "vloadunpackl<knc_packed_pair>\t%1, %g0\n\tvloadunpackh<knc_packed_pair>\t%2, %g0";
+}
+  [(set_attr "type" "multi")
+   (set_attr "memory" "load")
+   (set_attr "length" "24")
+   (set_attr "mode" "XI")])
+
+(define_insn "*knc_packed_unaligned_store<mode>"
+  [(set (match_operand:KNC_PACKED 0 "memory_operand" "=m")
+        (match_operand:KNC_PACKED 1 "register_operand" "YJ"))]
+  "TARGET_KNC && misaligned_operand (operands[0], <MODE>mode)"
+{
+  operands[2] = adjust_address (operands[0], <MODE>mode, 64);
   return "vpackstorel<knc_packed_pair>\t%g1, %0\n\tvpackstoreh<knc_packed_pair>\t%g1, %2";
 }
   [(set_attr "type" "multi")
-   (set_attr "memory" "load,store")
+   (set_attr "memory" "store")
    (set_attr "length" "24")
    (set_attr "mode" "XI")])

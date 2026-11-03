@@ -28,6 +28,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "memmodel.h"
 #include "tm_p.h"
 #include "emit-rtl.h"
+#include "recog.h"
 #include "explow.h"
 #include "expr.h"
 #include "varasm.h"
@@ -94,15 +95,14 @@ ix86_knc_expand_packed_move (machine_mode mode, rtx *operands)
   if (MEM_P (mem) && MEM_ALIGN (mem) < 512)
     {
       /* S3-03 / Intel 327364-001: a full unmasked pair is safe for a
-         mapped 64-byte payload.  Legalize A+64 before allocation, so a
-         displacement overflow cannot require a hidden output scratch.
-         Keep the logical memory access as one SET: the two halves have
-         alignment-dependent footprints, not two independent vectors.  */
-      rtx high = adjust_address (mem, mode, 64);
-      emit_insn (gen_rtx_PARALLEL (VOIDmode, gen_rtvec (2,
-                   gen_rtx_SET (operands[0], operands[1]),
-                   gen_rtx_USE (VOIDmode, XEXP (high, 0)))));
-      return;
+         mapped 64-byte payload.  Keep one logical SET and derive A+64
+         from its MEM at output, so combine cannot separate the halves.
+         Legalize displacement overflow now, without an output scratch.  */
+      rtx addr = XEXP (mem, 0);
+      if (!memory_address_addr_space_p (mode, plus_constant (Pmode, addr, 64),
+                                        MEM_ADDR_SPACE (mem)))
+        operands[MEM_P (operands[0]) ? 0 : 1]
+          = replace_equiv_address (mem, force_reg (Pmode, addr));
     }
   emit_insn (gen_rtx_SET (operands[0], operands[1]));
 }
