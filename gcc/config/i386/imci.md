@@ -194,3 +194,47 @@
   "vmovaps\t%g1, %g0"
   [(set_attr "type" "ssemov")
    (set_attr "mode" "XI")])
+(define_insn "knc_pause"
+  [(set (match_operand:BLK 0)
+        (unspec:BLK [(match_dup 0)
+                     (match_operand:SI 1 "register_operand" "r")]
+                    UNSPEC_PAUSE))]
+  "TARGET_KNC"
+  "delay\t%1"
+  [(set_attr "type" "other")
+   (set_attr "prefix" "vex")
+   (set_attr "memory" "unknown")])
+
+;; Intel 327364-001 Appendix A, DELAY (p. 628): register cycle-count
+;; operand, no flags modified.  The common pause expander supplies 32.
+;; The donor i386.md still emits rep;nop, so use the ISA definition.
+
+;; Legacy __sync lock operations need these libcalls too.  Model tags
+;; have GCC-internal SYNC bits which are not part of the libatomic ABI.
+(define_expand "atomic_exchangeti"
+  [(match_operand:TI 0 "register_operand")
+   (match_operand:TI 1 "memory_operand")
+   (match_operand:TI 2 "register_operand")
+   (match_operand:SI 3 "const_int_operand")]
+  "TARGET_KNC"
+{
+  rtx result = emit_library_call_value (
+    init_one_libfunc ("__atomic_exchange_16"), NULL_RTX, LCT_NORMAL,
+    TImode, XEXP (operands[1], 0), Pmode, operands[2], TImode,
+    GEN_INT (INTVAL (operands[3]) & MEMMODEL_BASE_MASK), SImode);
+  emit_move_insn (operands[0], result);
+  DONE;
+})
+
+(define_expand "atomic_storeti"
+  [(match_operand:TI 0 "memory_operand")
+   (match_operand:TI 1 "nonmemory_operand")
+   (match_operand:SI 2 "const_int_operand")]
+  "TARGET_KNC"
+{
+  emit_library_call (
+    init_one_libfunc ("__atomic_store_16"), LCT_NORMAL, VOIDmode,
+    XEXP (operands[0], 0), Pmode, operands[1], TImode,
+    GEN_INT (INTVAL (operands[2]) & MEMMODEL_BASE_MASK), SImode);
+  DONE;
+})

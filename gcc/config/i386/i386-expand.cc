@@ -26921,6 +26921,29 @@ ix86_expand_atomic_fetch_op_loop (rtx target, rtx mem, rtx val,
 			    doubleword, loop_label);
 }
 
+/* KNC has no CMPXCHG16B (Intel 327364-001, Appendix B).  Keep the
+   libatomic call and its expected-value temporary visible in RTL.
+   Do not add atomic_loadti: TI loads are not lock-free, and __atomic
+   operations must continue to use the matching libatomic implementation.  */
+void
+ix86_expand_knc_cas (rtx *operands)
+{
+  rtx expected = assign_stack_temp (TImode, 16);
+  emit_move_insn (expected, operands[3]);
+  rtx_mode_t args[] = {
+    rtx_mode_t (XEXP (operands[2], 0), Pmode),
+    rtx_mode_t (XEXP (expected, 0), Pmode),
+    rtx_mode_t (operands[4], TImode),
+    rtx_mode_t (GEN_INT (INTVAL (operands[6]) & MEMMODEL_BASE_MASK), SImode),
+    rtx_mode_t (GEN_INT (INTVAL (operands[7]) & MEMMODEL_BASE_MASK), SImode)
+  };
+  rtx result = emit_library_call_value_1 (
+    1, init_one_libfunc ("__atomic_compare_exchange_16"), NULL_RTX,
+    LCT_NORMAL, QImode, 5, args);
+  emit_move_insn (operands[0], result);
+  emit_move_insn (operands[1], expected);
+}
+
 /* Relax cmpxchg instruction, param loop_label indicates whether
    the instruction should be relaxed with a pause loop.  If not,
    it will be relaxed to an atomic load + compare, and skip
