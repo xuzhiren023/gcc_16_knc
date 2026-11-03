@@ -161,7 +161,7 @@ ix86_knc_expand_vector_init (rtx target, rtx vals)
 {
   machine_mode mode = GET_MODE (target);
   machine_mode inner = GET_MODE_INNER (mode);
-  unsigned int count = GET_MODE_NUNITS (mode).to_constant ();
+  unsigned int count = GET_MODE_NUNITS (mode);
   gcc_assert (count == (unsigned int) XVECLEN (vals, 0));
   bool same = true;
   for (unsigned int i = 1; i < count; ++i)
