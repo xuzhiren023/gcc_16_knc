@@ -2256,6 +2256,16 @@ classify_argument (machine_mode mode, const_tree type,
 		   enum x86_64_reg_class classes[MAX_CLASSES], int bit_offset,
 		   int &zero_width_bitfields)
 {
+  /* KNC scalar transport admits XImode, but its packed vector ABI belongs
+     to E3.  Reject vector types with scalar modes before classification,
+     including recursive classification of aggregate fields.  */
+  if (TARGET_KNC && type && TREE_CODE (type) == VECTOR_TYPE
+      && !VECTOR_MODE_P (mode))
+    {
+      error ("unsupported KNC register ABI mode");
+      return 0;
+    }
+
   HOST_WIDE_INT bytes
     = mode == BLKmode ? int_size_in_bytes (type) : (int) GET_MODE_SIZE (mode);
   int words = CEIL (bytes + (bit_offset % 64) / 8, UNITS_PER_WORD);
