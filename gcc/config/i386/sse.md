@@ -1964,10 +1964,15 @@
 })
 
 (define_expand "movmisalign<mode>"
-  [(set (match_operand:VMOVE 0 "nonimmediate_operand")
-	(match_operand:VMOVE 1 "nonimmediate_operand"))]
-  "TARGET_SSE"
+  [(set (match_operand:VMOVE_KNC 0 "nonimmediate_operand")
+	(match_operand:VMOVE_KNC 1 "nonimmediate_operand"))]
+  "TARGET_SSE || ix86_knc_packed_mode_p (<MODE>mode)"
 {
+  if (TARGET_KNC)
+    {
+      ix86_knc_expand_packed_move (<MODE>mode, operands);
+      DONE;
+    }
   ix86_expand_vector_move_misalign (<MODE>mode, operands);
   DONE;
 })
