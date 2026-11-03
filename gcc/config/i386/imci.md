@@ -238,3 +238,27 @@
     GEN_INT (INTVAL (operands[2]) & MEMMODEL_BASE_MASK), SImode);
   DONE;
 })
+
+;; Aligned packed storage only (ADR-0005 points 1, 3 and 7).
+(define_mode_iterator KNC_PACKED [V16SF V8DF V16SI V8DI])
+(define_mode_attr knc_packed_move
+  [(V16SF "vmovaps") (V8DF "vmovapd")
+   (V16SI "vmovdqa32") (V8DI "vmovdqa64")])
+
+(define_insn "*knc_packed_move<mode>"
+  [(set (match_operand:KNC_PACKED 0 "nonimmediate_operand" "=YJ,YJ,m,YJ")
+        (match_operand:KNC_PACKED 1 "nonimmediate_or_sse_const_operand"
+                                  "YJ,m,YJ,C"))]
+  "TARGET_KNC && (register_operand (operands[0], <MODE>mode)
+                  || register_operand (operands[1], <MODE>mode))"
+{
+  if (which_alternative == 3)
+    return "vpxord\t%g0, %g0, %g0";
+  if (MEM_P (operands[1])
+      && SYMBOL_REF_P (XEXP (operands[1], 0))
+      && CONSTANT_POOL_ADDRESS_P (XEXP (operands[1], 0)))
+    return "vmovaps\t%g1, %g0";
+  return "<knc_packed_move>\t%g1, %g0";
+}
+  [(set_attr "type" "ssemov")
+   (set_attr "mode" "XI")])

@@ -66,6 +66,10 @@ i386-expand.o: $(srcdir)/config/i386/i386-expand.cc
 	$(COMPILE) $<
 	$(POSTCOMPILE)
 
+i386-knc.o: $(srcdir)/config/i386/i386-knc.cc
+	$(COMPILE) $<
+	$(POSTCOMPILE)
+
 i386-features.o: $(srcdir)/config/i386/i386-features.cc
 	$(COMPILE) $<
 	$(POSTCOMPILE)
