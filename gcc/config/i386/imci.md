@@ -239,7 +239,7 @@
   DONE;
 })
 
-;; Aligned packed storage only (ADR-0005 points 1, 3 and 7).
+;; Packed storage (ADR-0005 points 1, 3, 4 and 7).
 (define_mode_iterator KNC_PACKED [V16SF V8DF V16SI V8DI])
 (define_mode_attr knc_packed_move
   [(V16SF "vmovaps") (V8DF "vmovapd")
@@ -250,7 +250,9 @@
         (match_operand:KNC_PACKED 1 "nonimmediate_or_sse_const_operand"
                                   "YJ,m,YJ,C"))]
   "TARGET_KNC && (register_operand (operands[0], <MODE>mode)
-                  || register_operand (operands[1], <MODE>mode))"
+                  || register_operand (operands[1], <MODE>mode))
+   && (!MEM_P (operands[0]) || MEM_ALIGN (operands[0]) >= 512)
+   && (!MEM_P (operands[1]) || MEM_ALIGN (operands[1]) >= 512)"
 {
   if (which_alternative == 3)
     return "vpxord\t%g0, %g0, %g0";
@@ -261,4 +263,26 @@
   return "<knc_packed_move>\t%g1, %g0";
 }
   [(set_attr "type" "ssemov")
+   (set_attr "mode" "XI")])
+
+;; Intel 327364-001, VLOADUNPACK / VPACKSTORE, and S3-03's card probe.
+;; Both instructions share one logical 64-byte access.  The high half at
+;; A+64 is a no-op when A is aligned; no mask or extra vector is needed.
+;; The explicit high address is allocated along with the low address.
+;; Mark the pair as multi and bound both instruction lengths, rather than
+;; pretending this is a single aligned move.  Spills retain the insn above.
+(define_mode_attr knc_packed_pair
+  [(V16SF "ps") (V8DF "pd") (V16SI "d") (V8DI "q")])
+
+(define_insn "*knc_packed_unaligned<mode>"
+  [(set (match_operand:KNC_PACKED 0 "nonimmediate_operand" "=YJ,m")
+        (match_operand:KNC_PACKED 1 "nonimmediate_operand" "m,YJ"))
+   (use (match_operand:DI 2 "address_operand" "p,p"))]
+  "TARGET_KNC"
+  "@
+   vloadunpackl<knc_packed_pair>\t%1, %g0\;vloadunpackh<knc_packed_pair>\t%a2, %g0
+   vpackstorel<knc_packed_pair>\t%g1, %0\;vpackstoreh<knc_packed_pair>\t%g1, %a2"
+  [(set_attr "type" "multi")
+   (set_attr "memory" "load,store")
+   (set_attr "length" "24")
    (set_attr "mode" "XI")])

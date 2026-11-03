@@ -90,5 +90,19 @@ ix86_knc_expand_packed_move (machine_mode mode, rtx *operands)
     operands[1] = validize_mem (force_const_mem (mode, operands[1]));
   if (MEM_P (operands[0]) && !REG_P (operands[1]))
     operands[1] = force_reg (mode, operands[1]);
+  rtx mem = MEM_P (operands[0]) ? operands[0] : operands[1];
+  if (MEM_P (mem) && MEM_ALIGN (mem) < 512)
+    {
+      /* S3-03 / Intel 327364-001: a full unmasked pair is safe for a
+         mapped 64-byte payload.  Legalize A+64 before allocation, so a
+         displacement overflow cannot require a hidden output scratch.
+         Keep the logical memory access as one SET: the two halves have
+         alignment-dependent footprints, not two independent vectors.  */
+      rtx high = adjust_address (mem, mode, 64);
+      emit_insn (gen_rtx_PARALLEL (VOIDmode, gen_rtvec (2,
+                   gen_rtx_SET (operands[0], operands[1]),
+                   gen_rtx_USE (VOIDmode, XEXP (high, 0)))));
+      return;
+    }
   emit_insn (gen_rtx_SET (operands[0], operands[1]));
 }
