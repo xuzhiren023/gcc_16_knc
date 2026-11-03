@@ -11,6 +11,54 @@
 (define_mode_attr knc_store
   [(SF "ps") (DF "pd") (SI "ps") (DI "pd") (TI "q") (TF "pd")])
 
+;; LRA supplies operand 2, leaving one GPR sufficient even when the other
+;; fourteen are live.  The HI mask is a separate allocated pseudo, never k2.
+;; Unlike the donor's memory-output secondary reload, both operands here
+;; are registers: LRA retains any address setup on the ordinary moves.
+(define_expand "knc_reload_out<mode>"
+  [(parallel [(match_operand:KNC_SCALAR 0 "register_operand" "")
+              (match_operand:KNC_SCALAR 1 "register_operand" "")
+              (match_operand:SI 2 "register_operand" "=&r")])]
+  "TARGET_KNC"
+{
+  rtx mem = assign_stack_temp (<MODE>mode, GET_MODE_SIZE (<MODE>mode));
+  rtx mask = gen_reg_rtx (HImode);
+  emit_move_insn (operands[2], GEN_INT (GET_MODE_SIZE (<MODE>mode) > 8 ? 3 : 1));
+  emit_insn (gen_knc_mask (mask, gen_lowpart (HImode, operands[2])));
+  emit_insn (gen_knc_store<mode> (mem, operands[1], mask));
+  emit_move_insn (operands[0], mem);
+  DONE;
+})
+
+(define_expand "knc_reload_in<mode>"
+  [(parallel [(match_operand:KNC_SCALAR 0 "register_operand" "")
+              (match_operand:KNC_SCALAR 1 "register_operand" "")
+              (match_operand:SI 2 "register_operand" "=&r")])]
+  "TARGET_KNC"
+{
+  rtx mem = assign_stack_temp (<MODE>mode, GET_MODE_SIZE (<MODE>mode));
+  emit_move_insn (mem, operands[1]);
+  if (<MODE>mode == TImode || <MODE>mode == TFmode)
+    {
+      rtx mask = gen_reg_rtx (HImode);
+      emit_move_insn (operands[2], GEN_INT (3));
+      emit_insn (gen_knc_mask (mask, gen_lowpart (HImode, operands[2])));
+      if (<MODE>mode == TImode)
+        emit_insn (gen_knc_load_pairti (operands[0], mem, mask));
+      else
+        emit_insn (gen_knc_load_pairtf (operands[0], mem, mask));
+    }
+  else if (<MODE>mode == SFmode)
+    emit_insn (gen_knc_loadsf (operands[0], mem));
+  else if (<MODE>mode == DFmode)
+    emit_insn (gen_knc_loaddf (operands[0], mem));
+  else if (<MODE>mode == SImode)
+    emit_insn (gen_knc_loadsi (operands[0], mem));
+  else
+    emit_insn (gen_knc_loaddi (operands[0], mem));
+  DONE;
+})
+
 ;; Both the GPR materialization and mask definition have ordinary dataflow.
 (define_insn "knc_mask"
   [(set (match_operand:HI 0 "register_operand" "=YK")
