@@ -244,6 +244,7 @@
 (define_mode_iterator KNC_FP [V16SF V8DF])
 (define_mode_attr knc_fp_suffix [(V16SF "ps") (V8DF "pd")])
 (define_mode_attr knc_fp_broadcast [(V16SF "ss") (V8DF "sd")])
+(define_mode_attr knc_fp_scalar [(V16SF "SF") (V8DF "DF")])
 (define_mode_attr knc_packed_move
   [(V16SF "vmovaps") (V8DF "vmovapd")
    (V16SI "vmovdqa32") (V8DI "vmovdqa64")])
@@ -359,7 +360,7 @@
 
 (define_expand "vec_duplicate<mode>"
   [(set (match_operand:KNC_FP 0 "register_operand")
-        (vec_duplicate:KNC_FP (match_operand:<ssescalarmode> 1 "nonimmediate_operand")))]
+        (vec_duplicate:KNC_FP (match_operand:<knc_fp_scalar> 1 "nonimmediate_operand")))]
   "TARGET_KNC"
 {
   ix86_knc_expand_duplicate (operands[0], operands[1]);
@@ -368,7 +369,7 @@
 
 (define_insn "*knc_broadcast_memory<mode>"
   [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
-        (vec_duplicate:KNC_FP (match_operand:<ssescalarmode> 1 "memory_operand" "m")))]
+        (vec_duplicate:KNC_FP (match_operand:<knc_fp_scalar> 1 "memory_operand" "m")))]
   "TARGET_KNC"
   "vbroadcast<knc_fp_broadcast>\t%1, %g0"
   [(set_attr "type" "ssemov") (set_attr "mode" "<MODE>")])
@@ -378,7 +379,7 @@
 ;; copies of lane zero.  Keep both instructions independently allocated.
 (define_insn "knc_broadcast_block<mode>"
   [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
-        (unspec:KNC_FP [(match_operand:<ssescalarmode> 1 "register_operand" "YJ")]
+        (unspec:KNC_FP [(match_operand:<knc_fp_scalar> 1 "register_operand" "YJ")]
                        UNSPEC_KNC_BROADCAST_BLOCK))]
   "TARGET_KNC"
   "vpermf32x4\t$0, %g1, %g0"
