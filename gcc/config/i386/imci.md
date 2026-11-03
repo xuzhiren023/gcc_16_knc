@@ -1,6 +1,6 @@
 ;; KNC scalar ABI transport (ADR-0004).
 ;; Lane-zero broadcasts and masked stores follow donor knc.md and i386.md.
-;; No SSE constraints, implicit scratch registers or arithmetic optabs.
+;; No SSE constraints or implicit scratch registers.
 ;; Transfers use UNSPEC to retain the memory bridge: forwarding a SET into
 ;; a plain x87/zmm register copy would require an unavailable instruction.
 
@@ -241,6 +241,9 @@
 
 ;; Packed storage (ADR-0005 points 1, 3, 4 and 7).
 (define_mode_iterator KNC_PACKED [V16SF V8DF V16SI V8DI])
+(define_mode_iterator KNC_FP [V16SF V8DF])
+(define_mode_attr knc_fp_suffix [(V16SF "ps") (V8DF "pd")])
+(define_mode_attr knc_fp_broadcast [(V16SF "ss") (V8DF "sd")])
 (define_mode_attr knc_packed_move
   [(V16SF "vmovaps") (V8DF "vmovapd")
    (V16SI "vmovdqa32") (V8DI "vmovdqa64")])
@@ -299,3 +302,106 @@
    (set_attr "memory" "store")
    (set_attr "length" "24")
    (set_attr "mode" "XI")])
+
+;; Intel 327364-001, VADD/VSUB/VMUL: only an aligned full-width memory
+;; operand may be folded.  vector_operand enforces that without AVX flags.
+(define_code_iterator KNC_FP_BINARY [plus minus mult])
+(define_code_attr knc_fp_binary [(plus "add") (minus "sub") (mult "mul")])
+(define_code_attr knc_fp_type [(plus "sseadd") (minus "sseadd") (mult "ssemul")])
+(define_insn "*knc_<knc_fp_binary><mode>3"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
+        (KNC_FP_BINARY:KNC_FP
+          (match_operand:KNC_FP 1 "register_operand" "YJ")
+          (match_operand:KNC_FP 2 "vector_operand" "YJm")))]
+  "TARGET_KNC"
+  "v<knc_fp_binary><knc_fp_suffix>\t%g2, %g1, %g0"
+  [(set_attr "type" "<knc_fp_type>")
+   (set_attr "mode" "<MODE>")])
+
+;; All four FMAMODEM expanders become available together.  These register
+;; forms implement each sign combination without any separate negation.
+;; The tied addend models the destructive 231 encoding for the allocator.
+(define_insn "*knc_fma<mode>4"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
+        (fma:KNC_FP (match_operand:KNC_FP 1 "nonimmediate_operand" "YJ")
+                    (match_operand:KNC_FP 2 "nonimmediate_operand" "YJ")
+                    (match_operand:KNC_FP 3 "nonimmediate_operand" "0")))]
+  "TARGET_KNC"
+  "vfmadd231<knc_fp_suffix>\t%g2, %g1, %g0"
+  [(set_attr "type" "ssemuladd") (set_attr "mode" "<MODE>")])
+
+(define_insn "*knc_fms<mode>4"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
+        (fma:KNC_FP (match_operand:KNC_FP 1 "nonimmediate_operand" "YJ")
+                    (match_operand:KNC_FP 2 "nonimmediate_operand" "YJ")
+                    (neg:KNC_FP (match_operand:KNC_FP 3 "nonimmediate_operand" "0"))))]
+  "TARGET_KNC"
+  "vfmsub231<knc_fp_suffix>\t%g2, %g1, %g0"
+  [(set_attr "type" "ssemuladd") (set_attr "mode" "<MODE>")])
+
+(define_insn "*knc_fnma<mode>4"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
+        (fma:KNC_FP (neg:KNC_FP (match_operand:KNC_FP 1 "nonimmediate_operand" "YJ"))
+                    (match_operand:KNC_FP 2 "nonimmediate_operand" "YJ")
+                    (match_operand:KNC_FP 3 "nonimmediate_operand" "0")))]
+  "TARGET_KNC"
+  "vfnmadd231<knc_fp_suffix>\t%g2, %g1, %g0"
+  [(set_attr "type" "ssemuladd") (set_attr "mode" "<MODE>")])
+
+(define_insn "*knc_fnms<mode>4"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
+        (fma:KNC_FP (neg:KNC_FP (match_operand:KNC_FP 1 "nonimmediate_operand" "YJ"))
+                    (match_operand:KNC_FP 2 "nonimmediate_operand" "YJ")
+                    (neg:KNC_FP (match_operand:KNC_FP 3 "nonimmediate_operand" "0"))))]
+  "TARGET_KNC"
+  "vfnmsub231<knc_fp_suffix>\t%g2, %g1, %g0"
+  [(set_attr "type" "ssemuladd") (set_attr "mode" "<MODE>")])
+
+(define_expand "vec_duplicate<mode>"
+  [(set (match_operand:KNC_FP 0 "register_operand")
+        (vec_duplicate:KNC_FP (match_operand:<ssescalarmode> 1 "nonimmediate_operand")))]
+  "TARGET_KNC"
+{
+  ix86_knc_expand_duplicate (operands[0], operands[1]);
+  DONE;
+})
+
+(define_insn "*knc_broadcast_memory<mode>"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
+        (vec_duplicate:KNC_FP (match_operand:<ssescalarmode> 1 "memory_operand" "m")))]
+  "TARGET_KNC"
+  "vbroadcast<knc_fp_broadcast>\t%1, %g0"
+  [(set_attr "type" "ssemov") (set_attr "mode" "<MODE>")])
+
+;; The block result has four copies of the scalar's low 128-bit block.
+;; Upper scalar lanes are unspecified; the following swizzle selects only
+;; copies of lane zero.  Keep both instructions independently allocated.
+(define_insn "knc_broadcast_block<mode>"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
+        (unspec:KNC_FP [(match_operand:<ssescalarmode> 1 "register_operand" "YJ")]
+                       UNSPEC_KNC_BROADCAST_BLOCK))]
+  "TARGET_KNC"
+  "vpermf32x4\t$0, %g1, %g0"
+  [(set_attr "type" "sselog1") (set_attr "mode" "<MODE>")])
+
+;; Explicit selects describe the real swizzle groups, not a fictitious
+;; full-vector register broadcast.  Intel 327364-001 tables 2.2 and 2.3.
+(define_insn "knc_broadcast_swizzlev16sf"
+  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
+        (vec_select:V16SF (match_operand:V16SF 1 "register_operand" "YJ")
+          (parallel [(const_int 0) (const_int 0) (const_int 0) (const_int 0)
+                     (const_int 4) (const_int 4) (const_int 4) (const_int 4)
+                     (const_int 8) (const_int 8) (const_int 8) (const_int 8)
+                     (const_int 12) (const_int 12) (const_int 12) (const_int 12)])))]
+  "TARGET_KNC"
+  "vmovaps\t%g1%{aaaa%}, %g0"
+  [(set_attr "type" "sselog1") (set_attr "mode" "V16SF")])
+
+(define_insn "knc_broadcast_swizzlev8df"
+  [(set (match_operand:V8DF 0 "register_operand" "=YJ")
+        (vec_select:V8DF (match_operand:V8DF 1 "register_operand" "YJ")
+          (parallel [(const_int 0) (const_int 0) (const_int 0) (const_int 0)
+                     (const_int 4) (const_int 4) (const_int 4) (const_int 4)])))]
+  "TARGET_KNC"
+  "vmovapd\t%g1%{aaaa%}, %g0"
+  [(set_attr "type" "sselog1") (set_attr "mode" "V8DF")])
