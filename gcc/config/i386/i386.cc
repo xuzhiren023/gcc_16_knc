@@ -549,7 +549,7 @@ ix86_conditional_register_usage (void)
     accessible_reg_set &= ~reg_class_contents[MMX_REGS];
 
   /* If SSE is disabled, disable the registers.  */
-  if (! TARGET_SSE)
+  if (! TARGET_SSE && !TARGET_KNC)
     accessible_reg_set &= ~reg_class_contents[ALL_SSE_REGS];
 
   /* If the FPU is disabled, disable the registers.  */
@@ -557,7 +557,7 @@ ix86_conditional_register_usage (void)
     accessible_reg_set &= ~reg_class_contents[FLOAT_REGS];
 
   /* If AVX512F is disabled, disable the registers.  */
-  if (! TARGET_AVX512F)
+  if (! TARGET_AVX512F && !TARGET_KNC)
     {
       for (i = FIRST_EXT_REX_SSE_REG; i <= LAST_EXT_REX_SSE_REG; i++)
 	CLEAR_HARD_REG_BIT (accessible_reg_set, i);
@@ -1583,7 +1583,8 @@ ix86_function_arg_regno_p (int regno)
   enum calling_abi call_abi;
   const int *parm_regs;
 
-  if (TARGET_SSE && SSE_REGNO_P (regno)
+  if ((TARGET_SSE || (TARGET_KNC && ix86_cfun_abi () == SYSV_ABI))
+      && SSE_REGNO_P (regno)
       && regno < FIRST_SSE_REG + SSE_REGPARM_MAX)
     return true;
 
@@ -1924,7 +1925,7 @@ init_cumulative_args (CUMULATIVE_ARGS *cum,  /* Argument info to initialize */
                    ? X86_64_REGPARM_MAX
                    : X86_64_MS_REGPARM_MAX);
     }
-  if (TARGET_SSE)
+  if (TARGET_SSE || (TARGET_KNC && cum->call_abi == SYSV_ABI))
     {
       cum->sse_nregs = SSE_REGPARM_MAX;
       if (TARGET_64BIT)
@@ -2818,9 +2819,26 @@ construct_container (machine_mode mode, machine_mode orig_mode,
   if (needed_intregs > nintregs || needed_sseregs > nsseregs)
     return NULL;
 
+  /* Sprint 2 exposes scalar storage only, not SSE vector/half/decimal
+     modes.  Diagnose an unsupported ABI before constructing a hard reg.  */
+  if (TARGET_KNC && needed_sseregs)
+    {
+      bool unsupported = (VECTOR_MODE_P (mode)
+			  || DECIMAL_FLOAT_MODE_P (GET_MODE_INNER (mode))
+                          || GET_MODE_INNER (mode) == HFmode
+                          || GET_MODE_INNER (mode) == BFmode);
+      for (i = 0; i < n; ++i)
+        unsupported |= regclass[i] == X86_64_SSEHF_CLASS;
+      if (unsupported)
+        {
+          error ("unsupported KNC register ABI mode");
+          return NULL;
+        }
+    }
+
   /* We allowed the user to turn off SSE for kernel mode.  Don't crash if
      some less clueful developer tries to use floating-point anyway.  */
-  if (needed_sseregs
+  if (needed_sseregs && !TARGET_KNC
       && (!TARGET_SSE || (VALID_SSE2_TYPE_MODE (mode) && !TARGET_SSE2)))
     {
       /* Return early if we shouldn't raise an error for invalid
@@ -3886,7 +3904,7 @@ ix86_function_value_regno_p (const unsigned int regno)
       /* Complex values are returned in %xmm0/%xmm1 pair.  */
     case XMM0_REG:
     case XMM1_REG:
-      return TARGET_SSE;
+      return TARGET_SSE || (TARGET_KNC && ix86_cfun_abi () == SYSV_ABI);
 
     case MM0_REG:
       if (TARGET_MACHO || TARGET_64BIT)
@@ -4071,6 +4089,11 @@ ix86_zero_call_used_regs (HARD_REG_SET need_zeroed_hardregs)
   bool all_mm_zeroed = false;
 
   CLEAR_HARD_REG_SET (zeroed_hardregs);
+  if (TARGET_KNC)
+    {
+      error ("zero-call-used-regs is unsupported for KNC");
+      return zeroed_hardregs;
+    }
 
   /* first, let's see whether we can zero all vector registers together.  */
   rtx zero_all_vec_insn = zero_all_vector_registers (need_zeroed_hardregs);
@@ -4300,6 +4323,12 @@ function_value_64 (machine_mode orig_mode, machine_mode mode,
 	  regno = AX_REG;
 	}
 
+      if (TARGET_KNC && regno == FIRST_SSE_REG
+          && mode != SFmode && mode != DFmode && mode != TFmode)
+        {
+          error ("unsupported KNC libcall result mode");
+          regno = AX_REG;
+        }
       return gen_rtx_REG (mode, regno);
     }
   else if (POINTER_TYPE_P (valtype))
@@ -21141,6 +21170,11 @@ ix86_preferred_output_reload_class (rtx x, reg_class_t regclass)
      math on.  If we would like not to return a subset of CLASS, reject this
      alternative: if reload cannot do this, it will still use its choice.  */
   machine_mode mode = GET_MODE (x);
+  if (TARGET_KNC && SSE_CLASS_P (regclass)
+      && (mode == SFmode || mode == DFmode || mode == SImode
+          || mode == DImode || mode == TImode || mode == TFmode
+          || mode == XImode))
+    return regclass;
   if (SSE_FLOAT_MODE_P (mode) && TARGET_SSE_MATH)
     return MAYBE_SSE_CLASS_P (regclass) ? ALL_SSE_REGS : NO_REGS;
 
@@ -21809,6 +21843,12 @@ ix86_hard_regno_mode_ok (unsigned int regno, machine_mode mode)
     return false;
   if (STACK_REGNO_P (regno))
     return VALID_FP_MODE_P (mode);
+  if (TARGET_KNC && MASK_REGNO_P (regno))
+    return mode == HImode;
+  if (TARGET_KNC && SSE_REGNO_P (regno))
+    return mode == SFmode || mode == DFmode || mode == SImode
+           || mode == DImode || mode == TImode || mode == TFmode
+           || mode == XImode;
   if (MASK_REGNO_P (regno))
     {
       /* Register pair only starts at even register number.  */

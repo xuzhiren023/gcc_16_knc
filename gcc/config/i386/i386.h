@@ -847,7 +847,7 @@ extern const char *host_detect_local_cpu (int argc, const char **argv);
    TARGET_ABSOLUTE_BIGGEST_ALIGNMENT.  */
 
 #define BIGGEST_ALIGNMENT \
-  (TARGET_IAMCU ? 32 : (TARGET_AVX512F \
+  (TARGET_IAMCU ? 32 : ((TARGET_AVX512F || TARGET_KNC) \
 			? 512 : (TARGET_AVX ? 256 : 128)))
 
 /* Maximum stack alignment.  */

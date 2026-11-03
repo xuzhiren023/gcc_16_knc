@@ -370,6 +370,22 @@ ix86_expand_move (machine_mode mode, rtx operands[])
   op0 = operands[0];
   op1 = operands[1];
 
+  /* KNC ABI registers are storage, not an SSE arithmetic bank.  The
+     expander exposes the memory bridge and allocated mask to the RTL.  */
+  if (TARGET_KNC && (SSE_REG_P (op0) || SSE_REG_P (op1)))
+    {
+      switch (mode)
+	{
+	case SFmode: emit_insn (gen_knc_movesf (op0, op1)); return;
+	case DFmode: emit_insn (gen_knc_movedf (op0, op1)); return;
+	case SImode: emit_insn (gen_knc_movesi (op0, op1)); return;
+	case DImode: emit_insn (gen_knc_movedi (op0, op1)); return;
+	case TImode: emit_insn (gen_knc_moveti (op0, op1)); return;
+	case TFmode: emit_insn (gen_knc_movetf (op0, op1)); return;
+	default: break;
+	}
+    }
+
   /* Avoid complex sets of likely spilled hard registers before reload.  */
   if (!ix86_hardreg_mov_ok (op0, op1))
     {
