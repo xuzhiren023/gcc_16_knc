@@ -34,6 +34,10 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
 #undef TARGET_SUBTARGET64_ISA_DEFAULT
 #define TARGET_SUBTARGET64_ISA_DEFAULT 0
 
+/* Match the donor's debug format for the card's debugger.  */
+#undef DWARF_VERSION_DEFAULT
+#define DWARF_VERSION_DEFAULT 4
+
 /* The driver otherwise injects its configured x86-64/generic defaults
    before SUBSUBTARGET_OVERRIDE_OPTIONS can select KNC.  */
 #undef OPTION_DEFAULT_SPECS
