@@ -20,12 +20,27 @@
   "kmov\t%k1, %0"
   [(set_attr "type" "mskmov")])
 
-(define_insn "*knc_mask_move"
-  [(set (match_operand:HI 0 "nonimmediate_operand" "=YK,r,YK,m")
-        (match_operand:HI 1 "nonimmediate_operand" "YKm,YK,r,YK"))]
-  "TARGET_KNC && (MASK_REG_P (operands[0]) || MASK_REG_P (operands[1]))"
-  "kmov\t%k1, %k0"
-  [(set_attr "type" "mskmov")])
+;; A complete HI move must recognize LRA's pseudos before allocation.
+;; Prefer GPRs for ordinary shorts; mask forms follow donor *movhi_internal.
+(define_insn "*knc_movhi"
+  [(set (match_operand:HI 0 "nonimmediate_operand"
+          "=r,r,r,m,m,?*YK,?r,?*YK,?*YK,?m")
+        (match_operand:HI 1 "general_operand"
+          "r,m,n,r,n,r,*YK,*YK,m,*YK"))]
+  "TARGET_KNC && !(MEM_P (operands[0]) && MEM_P (operands[1]))"
+  "@
+   mov{w}\t{%1, %0|%0, %1}
+   mov{w}\t{%1, %0|%0, %1}
+   mov{w}\t{%1, %0|%0, %1}
+   mov{w}\t{%1, %0|%0, %1}
+   mov{w}\t{%1, %0|%0, %1}
+   kmov\t{%k1, %0|%0, %k1}
+   kmov\t{%1, %k0|%k0, %1}
+   kmov\t{%1, %0|%0, %1}
+   kmov\t{%1, %0|%0, %1}
+   kmov\t{%1, %0|%0, %1}"
+  [(set_attr "type" "imov,imov,imov,imov,imov,mskmov,mskmov,mskmov,mskmov,mskmov")
+   (set_attr "mode" "HI")])
 
 (define_insn "knc_store<mode>"
   [(set (match_operand:KNC_SCALAR 0 "memory_operand" "=m")
