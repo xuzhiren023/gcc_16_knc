@@ -2260,8 +2260,7 @@ classify_argument (machine_mode mode, const_tree type,
   /* KNC scalar transport admits XImode, but its packed vector ABI belongs
      to E3.  Reject vector types with XImode before classification,
      including recursive classification of aggregate fields.  */
-  if (TARGET_KNC && type && TREE_CODE (type) == VECTOR_TYPE
-      && mode == XImode)
+  if (TARGET_KNC && ix86_knc_unsupported_abi_type_p (type, mode))
     {
       error ("unsupported KNC register ABI mode");
       return 0;
@@ -5501,6 +5500,8 @@ standard_sse_constant_p (rtx x, machine_mode pred_mode)
 {
   machine_mode mode;
 
+  if (TARGET_KNC)
+    return ix86_knc_zero_constant_p (x, pred_mode);
   if (!TARGET_SSE)
     return 0;
 
@@ -21898,6 +21899,7 @@ ix86_hard_regno_mode_ok (unsigned int regno, machine_mode mode)
   if (TARGET_KNC && SSE_REGNO_P (regno))
     return mode == SFmode || mode == DFmode || mode == SImode
            || mode == DImode || mode == TImode || mode == TFmode
+	   || ix86_knc_packed_mode_p (mode)
            || mode == XImode;
   if (MASK_REGNO_P (regno))
     {
@@ -22166,6 +22168,7 @@ ix86_set_reg_reg_cost (machine_mode mode)
     case MODE_VECTOR_INT:
     case MODE_VECTOR_FLOAT:
       if ((TARGET_AVX512F && VALID_AVX512F_REG_MODE (mode))
+	  || ix86_knc_packed_mode_p (mode)
 	  || (TARGET_AVX && VALID_AVX256_REG_MODE (mode))
 	  || (TARGET_SSE2 && VALID_SSE2_REG_MODE (mode))
 	  || (TARGET_SSE && VALID_SSE_REG_MODE (mode))
@@ -25176,6 +25179,8 @@ ix86_libgcc_floating_mode_supported_p (scalar_float_mode mode)
 static bool
 ix86_vector_mode_supported_p (machine_mode mode)
 {
+  if (TARGET_KNC)
+    return ix86_knc_packed_mode_p (mode);
   /* For ia32, scalar TImode isn't supported and so V1TImode shouldn't be
      either.  */
   if (!TARGET_64BIT && GET_MODE_INNER (mode) == TImode)
