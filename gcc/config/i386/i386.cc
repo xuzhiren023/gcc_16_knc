@@ -2257,10 +2257,10 @@ classify_argument (machine_mode mode, const_tree type,
 		   int &zero_width_bitfields)
 {
   /* KNC scalar transport admits XImode, but its packed vector ABI belongs
-     to E3.  Reject vector types with scalar modes before classification,
+     to E3.  Reject vector types with XImode before classification,
      including recursive classification of aggregate fields.  */
   if (TARGET_KNC && type && TREE_CODE (type) == VECTOR_TYPE
-      && !VECTOR_MODE_P (mode))
+      && mode == XImode)
     {
       error ("unsupported KNC register ABI mode");
       return 0;
