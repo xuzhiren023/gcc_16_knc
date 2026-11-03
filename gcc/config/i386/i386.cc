@@ -21205,14 +21205,15 @@ static reg_class_t
 ix86_secondary_reload (bool in_p, rtx x, reg_class_t rclass,
 		       machine_mode mode, secondary_reload_info *sri)
 {
-  /* GCC 16 only calls this path for register moves.  Keep the complete
+  /* GCC 16 passes unstripped register or SUBREG operands here.  Keep the complete
      memory bridge in the expander, with an allocated mask materialization
      scratch (ADR-0004), rather than the donor's deleted memory store.  */
-  if (TARGET_KNC && REG_P (x)
-      && SSE_CLASS_P (rclass) != SSE_REGNO_P (true_regnum (x)))
+  int knc_regno = TARGET_KNC ? true_regnum (x) : -1;
+  if (TARGET_KNC && knc_regno >= 0 && knc_regno < FIRST_PSEUDO_REGISTER
+      && SSE_CLASS_P (rclass) != SSE_REGNO_P (knc_regno))
     {
       bool to_vector = in_p ? SSE_CLASS_P (rclass)
-			   : SSE_REGNO_P (true_regnum (x));
+			   : SSE_REGNO_P (knc_regno);
       switch (mode)
 	{
 #define KNC_RELOAD(M, m) \
@@ -21481,7 +21482,9 @@ ix86_secondary_memory_needed (machine_mode mode, reg_class_t class1,
 {
   /* Use KNC's secondary reload expander, but retain the memory cost in
      inline_secondary_memory_needed for ix86_register_move_cost.  */
-  if (TARGET_KNC && SSE_CLASS_P (class1) != SSE_CLASS_P (class2))
+  if (TARGET_KNC && SSE_CLASS_P (class1) != SSE_CLASS_P (class2)
+      && (mode == SFmode || mode == DFmode || mode == SImode
+	  || mode == DImode || mode == TImode || mode == TFmode))
     return false;
   return inline_secondary_memory_needed (mode, class1, class2, true);
 }
