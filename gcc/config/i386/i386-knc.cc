@@ -45,6 +45,21 @@ ix86_knc_packed_mode_p (machine_mode mode)
 	     || mode == V16SImode || mode == V8DImode);
 }
 
+/* ADR-0005 point 5: try one full ZMM vector size.  Unsupported scalar
+   types retain word_mode; tails and peeling use the scalar expanders.  */
+machine_mode
+ix86_knc_preferred_simd_mode (scalar_mode mode)
+{
+  switch (mode)
+    {
+    case E_SFmode: return V16SFmode;
+    case E_DFmode: return V8DFmode;
+    case E_SImode: return V16SImode;
+    case E_DImode: return V8DImode;
+    default: return word_mode;
+    }
+}
+
 /* Only a packed all-bits-zero constant has an immediate IMCI form.  */
 bool
 ix86_knc_zero_constant_p (rtx x, machine_mode mode)
@@ -128,6 +143,7 @@ void
 ix86_knc_expand_duplicate (rtx target, rtx value)
 {
   machine_mode mode = GET_MODE (target);
+  gcc_assert (mode == V16SFmode || mode == V8DFmode);
   machine_mode inner = GET_MODE_INNER (mode);
   if (CONSTANT_P (value))
     {
