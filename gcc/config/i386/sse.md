@@ -5282,10 +5282,11 @@
 
 (define_expand "vec_cmp<mode><avx512fmaskmodelower>"
   [(set (match_operand:<avx512fmaskmode> 0 "register_operand")
-	(match_operator:<avx512fmaskmode> 1 ""
+	(match_operator:<avx512fmaskmode> 1 "knc_vec_cmp_operator"
 	  [(match_operand:V48H_AVX512VL 2 "register_operand")
 	   (match_operand:V48H_AVX512VL 3 "nonimmediate_operand")]))]
-  "TARGET_AVX512F"
+  "TARGET_AVX512F
+   || (ix86_knc_packed_mode_p (<MODE>mode) && <MODE>mode != V8DImode)"
 {
   bool ok = ix86_expand_mask_vec_cmp (operands[0], GET_CODE (operands[1]),
 				      operands[2], operands[3]);
@@ -5384,7 +5385,8 @@
 	(match_operator:<avx512fmaskmode> 1 ""
 	  [(match_operand:VI48_AVX512VL 2 "register_operand")
 	   (match_operand:VI48_AVX512VL 3 "nonimmediate_operand")]))]
-  "TARGET_AVX512F"
+  "TARGET_AVX512F
+   || (ix86_knc_packed_mode_p (<MODE>mode) && <MODE>mode == V16SImode)"
 {
   bool ok = ix86_expand_mask_vec_cmp (operands[0], GET_CODE (operands[1]),
 				      operands[2], operands[3]);
@@ -5509,7 +5511,11 @@
 	  (match_operand:V48_AVX512VL 1 "nonimmediate_operand")
 	  (match_operand:V48_AVX512VL 2 "nonimm_or_0_operand")
 	  (match_operand:<avx512fmaskmode> 3 "register_operand")))]
-  "TARGET_AVX512F")
+  "TARGET_AVX512F || ix86_knc_packed_mode_p (<MODE>mode)"
+{
+  if (TARGET_KNC)
+    operands[2] = force_reg (<MODE>mode, operands[2]);
+})
 
 (define_expand "vcond_mask_<mode><avx512fmaskmodelower>"
   [(set (match_operand:VI12HFBF_AVX512VL 0 "register_operand")

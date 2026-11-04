@@ -26077,7 +26077,7 @@ ix86_get_mask_mode (machine_mode data_mode)
   unsigned elem_size = vector_size / nunits;
 
   /* Scalar mask case.  */
-  if ((TARGET_AVX512F && vector_size == 64)
+  if (((TARGET_AVX512F || TARGET_KNC) && vector_size == 64)
       || (TARGET_AVX512VL && (vector_size == 32 || vector_size == 16))
       /* AVX512FP16 only supports vector comparison
 	 to kmask for _Float16.  */
