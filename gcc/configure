@@ -5604,7 +5604,7 @@ case "${target}" in
 
     # Some targets support both -fPIC and -fpic, but prefer the latter.
     # FIXME: Why?
-    i[34567]86-*-* | x86_64-*-* | k1om-*-linux*)
+    i[34567]86-*-* | x86_64-*-*)
 	PICFLAG_FOR_TARGET=-fpic
 	;;
     # FIXME: Override -fPIC default in libgcc only?
