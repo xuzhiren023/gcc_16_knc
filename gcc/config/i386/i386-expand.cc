@@ -4835,6 +4835,8 @@ ix86_cmp_code_to_pcmp_immediate (enum rtx_code code, machine_mode mode)
 bool
 ix86_expand_mask_vec_cmp (rtx dest, enum rtx_code code, rtx cmp_op0, rtx cmp_op1)
 {
+  if (TARGET_KNC)
+    return ix86_knc_expand_mask_vec_cmp (dest, code, cmp_op0, cmp_op1);
   machine_mode mask_mode = GET_MODE (dest);
   machine_mode cmp_mode = GET_MODE (cmp_op0);
   rtx imm = GEN_INT (ix86_cmp_code_to_pcmp_immediate (code, cmp_mode));

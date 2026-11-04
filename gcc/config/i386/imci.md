@@ -131,6 +131,31 @@
   [(set_attr "type" "imov,imov,imov,imov,imov,mskmov,mskmov,mskmov")
    (set_attr "mode" "HI")])
 
+;; ADR-0007 point 1: 8-lane masks are QI.  Like *knc_movhi, a complete QI
+;; move ahead of *movqi_internal, whose k alternatives are AVX-512 kmovw or
+;; kmovb.  GPR destinations are written whole (movl, movzbl), so byte moves
+;; keep the code *movqi_internal gives under KNC's partial-register tuning.
+;; q, not r, keeps -m32 stores on byte registers.  A k register reaches
+;; memory through a GPR (ix86_secondary_reload supplies Q_REGS).  kmov r32,k
+;; also copies bits 15:8 of the mask; a QI value never reads them.
+(define_insn "*knc_movqi"
+  [(set (match_operand:QI 0 "nonimmediate_operand"
+          "=q,q,q,m,m,?*YK,?r,?*YK")
+        (match_operand:QI 1 "general_operand"
+          "q,m,n,q,n,r,*YK,*YK"))]
+  "TARGET_KNC && !(MEM_P (operands[0]) && MEM_P (operands[1]))"
+  "@
+   mov{l}\t{%k1, %k0|%k0, %k1}
+   movz{bl|x}\t{%1, %k0|%k0, %1}
+   mov{l}\t{%k1, %k0|%k0, %k1}
+   mov{b}\t{%1, %0|%0, %1}
+   mov{b}\t{%1, %0|%0, %1}
+   kmov\t{%k1, %0|%0, %k1}
+   kmov\t{%1, %k0|%k0, %1}
+   kmov\t{%1, %0|%0, %1}"
+  [(set_attr "type" "imov,imovx,imov,imov,imov,mskmov,mskmov,mskmov")
+   (set_attr "mode" "SI,SI,SI,QI,QI,QI,QI,QI")])
+
 (define_insn "knc_store<mode>"
   [(set (match_operand:KNC_SCALAR 0 "memory_operand" "=m")
         (unspec:KNC_SCALAR
@@ -489,3 +514,70 @@
   "TARGET_KNC"
   "vmovapd\t%g1%{aaaa%}, %g0"
   [(set_attr "type" "sselog1") (set_attr "mode" "V8DF")])
+
+;; Compares into k masks (ADR-0007 points 1, 2, 3 and 5).
+;; The shared vec_cmp expander passes its comparison through this predicate.
+;; Under KNC it refuses the quiet UNLT, UNLE, UNGT, UNGE, UNEQ and LTGT:
+;; they need a guarded compare that the card has not cleared yet (point 5),
+;; so can_vec_cmp_compare_p reports no support and those loops stay scalar.
+;; Any other target keeps the expander's former "" (any comparison).
+(define_special_predicate "knc_vec_cmp_operator"
+  (ior (not (match_test "TARGET_KNC"))
+       (match_code "eq,ne,lt,le,gt,ge,ltu,leu,gtu,geu,unordered,ordered")))
+
+;; k1om has no vpcmpq, so V8DI compares stay off (point 6).
+(define_mode_iterator KNC_CMP [V16SF V8DF V16SI])
+;; sse.md's avx512fmaskmode, which is defined after this file is read.
+(define_mode_attr knc_maskmode [(V16SF "HI") (V16SI "HI") (V8DF "QI") (V8DI "QI")])
+(define_mode_attr knc_cmp [(V16SF "vcmpps") (V8DF "vcmppd") (V16SI "vpcmpd")])
+
+;; Intel 327364-001 VCMPPS/VCMPPD and VPCMPD/VPCMPUD.  Operand 3 is KNC's
+;; 3-bit predicate (ix86_knc_expand_mask_vec_cmp), not AVX-512's 5-bit one.
+;; The 8-lane forms write zero to bits 15:8 of the mask.
+;; Unsigned compares use UNSPEC_KNC_UCMP: sse.md's UNSPEC_UNSIGNED_PCMP is
+;; declared after this file is read.
+(define_c_enum "unspec" [UNSPEC_KNC_UCMP])
+(define_insn "*knc_cmp<mode>"
+  [(set (match_operand:<knc_maskmode> 0 "register_operand" "=YK")
+	(unspec:<knc_maskmode>
+	  [(match_operand:KNC_CMP 1 "register_operand" "YJ")
+	   (match_operand:KNC_CMP 2 "nonimmediate_operand" "YJBm")
+	   (match_operand:SI 3 "const_0_to_7_operand")]
+	  UNSPEC_PCMP))]
+  "TARGET_KNC"
+  "<knc_cmp>\t{%3, %g2, %g1, %0|%0, %g1, %g2, %3}"
+  [(set_attr "type" "ssecmp")
+   (set_attr "length_immediate" "1")
+   (set_attr "mode" "XI")])
+
+(define_insn "*knc_ucmpv16si"
+  [(set (match_operand:HI 0 "register_operand" "=YK")
+	(unspec:HI
+	  [(match_operand:V16SI 1 "register_operand" "YJ")
+	   (match_operand:V16SI 2 "nonimmediate_operand" "YJBm")
+	   (match_operand:SI 3 "const_0_to_7_operand")]
+	  UNSPEC_KNC_UCMP))]
+  "TARGET_KNC"
+  "vpcmpud\t{%3, %g2, %g1, %0|%0, %g1, %g2, %3}"
+  [(set_attr "type" "ssecmp")
+   (set_attr "length_immediate" "1")
+   (set_attr "mode" "XI")])
+
+;; Intel 327364-001 VBLENDMPS/VBLENDMPD/VPBLENDMD/VPBLENDMQ: the destination
+;; takes operand 1 where the mask is set and operand 2 elsewhere, which is
+;; vcond_mask's (vec_merge op1 op2 mask).  The mask is k1-k7 (k0 means no
+;; mask).  The shared vcond_mask expander puts a zero else-value in a
+;; register first, so its vpxord is a visible, hoistable insn (point 3).
+(define_mode_attr knc_blend
+  [(V16SF "vblendmps") (V8DF "vblendmpd")
+   (V16SI "vpblendmd") (V8DI "vpblendmq")])
+(define_insn "*knc_blend<mode>"
+  [(set (match_operand:KNC_PACKED 0 "register_operand" "=YJ")
+	(vec_merge:KNC_PACKED
+	  (match_operand:KNC_PACKED 1 "nonimmediate_operand" "YJBm")
+	  (match_operand:KNC_PACKED 2 "register_operand" "YJ")
+	  (match_operand:<knc_maskmode> 3 "register_operand" "YL")))]
+  "TARGET_KNC"
+  "<knc_blend>\t{%g1, %g2, %g0%{%3%}|%g0%{%3%}, %g2, %g1}"
+  [(set_attr "type" "ssemov")
+   (set_attr "mode" "XI")])

@@ -33,6 +33,7 @@ extern void ix86_knc_expand_vector_move (machine_mode, rtx *);
 extern void ix86_knc_fixup_binary_operands (machine_mode, rtx *);
 extern void ix86_knc_expand_vector_init (rtx, rtx);
 extern void ix86_knc_expand_duplicate (rtx, rtx);
+extern bool ix86_knc_expand_mask_vec_cmp (rtx, enum rtx_code, rtx, rtx);
 
 extern void ix86_expand_knc_cas (rtx *);
 extern void ix86_knc_expand_atomic_exchange (rtx *);

@@ -467,8 +467,9 @@ ix86_knc_reload_memory_bridge_p (machine_mode mode, reg_class_t class1,
 bool
 ix86_knc_hard_regno_mode_ok (unsigned int regno, machine_mode mode)
 {
+  /* ADR-0007 point 1: 16-lane masks are HI, 8-lane masks QI.  */
   if (MASK_REGNO_P (regno))
-    return mode == HImode;
+    return mode == HImode || mode == QImode;
   return knc_scalar_transport_mode_p (mode)
          || ix86_knc_packed_mode_p (mode) || mode == XImode;
 }
@@ -506,3 +507,40 @@ ix86_knc_secondary_reload (bool in_p, rtx x, reg_class_t rclass,
   return false;
 }
 
+/* ADR-0007 point 5 and Intel 327364-001 VCMPPS/VCMPPD (3-bit predicate:
+   eq 0, lt 1, le 2, unord 3, neq 4, nlt 5, nle 6, ord 7) and VPCMPD/VPCMPUD
+   (3 and 7 reserved).  FP > and >= swap the operands of lt and le, so they
+   signal on a QNaN as C requires; the quiet UNLT..UNEQ and LTGT never get
+   here (knc_vec_cmp_operator).  The immediates of the integer forms are
+   those of ix86_cmp_code_to_pcmp_immediate.  */
+bool
+ix86_knc_expand_mask_vec_cmp (rtx dest, enum rtx_code code, rtx op0, rtx op1)
+{
+  machine_mode mode = GET_MODE (op0);
+  bool fp = FLOAT_MODE_P (mode);
+  bool swap = false;
+  int imm;
+  switch (code)
+    {
+    case EQ: imm = 0; break;
+    case NE: imm = 4; break;
+    case LT: case LTU: imm = 1; break;
+    case LE: case LEU: imm = 2; break;
+    case GT: case GTU: imm = fp ? 1 : 6; swap = fp; break;
+    case GE: case GEU: imm = fp ? 2 : 5; swap = fp; break;
+    case UNORDERED: gcc_assert (fp); imm = 3; break;
+    case ORDERED: gcc_assert (fp); imm = 7; break;
+    default: gcc_unreachable ();
+    }
+  if (swap)
+    std::swap (op0, op1);
+  op0 = force_reg (mode, op0);
+  if (!nonimmediate_operand (op1, mode))
+    op1 = force_reg (mode, op1);
+  bool unsigned_p = code == LTU || code == LEU || code == GTU || code == GEU;
+  rtx cmp = gen_rtx_UNSPEC (GET_MODE (dest),
+			    gen_rtvec (3, op0, op1, GEN_INT (imm)),
+			    unsigned_p ? UNSPEC_KNC_UCMP : UNSPEC_PCMP);
+  emit_insn (gen_rtx_SET (dest, cmp));
+  return true;
+}
