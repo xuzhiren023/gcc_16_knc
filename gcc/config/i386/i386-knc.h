@@ -21,6 +21,7 @@ along with GCC; see the file COPYING3.  If not see
 
 extern bool ix86_knc_packed_mode_p (machine_mode);
 extern machine_mode ix86_knc_preferred_simd_mode (scalar_mode);
+extern bool ix86_knc_support_vector_misalignment (machine_mode, int, bool, bool);
 
 extern bool ix86_knc_zero_constant_p (rtx, machine_mode);
 extern bool ix86_knc_unsupported_abi_type_p (const_tree, machine_mode);

@@ -301,7 +301,8 @@
 (define_insn "*knc_packed_unaligned_load<mode>"
   [(set (match_operand:KNC_PACKED 0 "register_operand" "=YJ")
         (match_operand:KNC_PACKED 1 "memory_operand" "m"))]
-  "TARGET_KNC && misaligned_operand (operands[1], <MODE>mode)"
+  "TARGET_KNC && misaligned_operand (operands[1], <MODE>mode)
+   && MEM_ALIGN (operands[1]) >= GET_MODE_BITSIZE (GET_MODE_INNER (<MODE>mode))"
 {
   operands[2] = adjust_address (operands[1], <MODE>mode, 64);
   return "vloadunpackl<knc_packed_pair>\t%1, %g0\n\tvloadunpackh<knc_packed_pair>\t%2, %g0";
@@ -314,7 +315,8 @@
 (define_insn "*knc_packed_unaligned_store<mode>"
   [(set (match_operand:KNC_PACKED 0 "memory_operand" "=m")
         (match_operand:KNC_PACKED 1 "register_operand" "YJ"))]
-  "TARGET_KNC && misaligned_operand (operands[0], <MODE>mode)"
+  "TARGET_KNC && misaligned_operand (operands[0], <MODE>mode)
+   && MEM_ALIGN (operands[0]) >= GET_MODE_BITSIZE (GET_MODE_INNER (<MODE>mode))"
 {
   operands[2] = adjust_address (operands[0], <MODE>mode, 64);
   return "vpackstorel<knc_packed_pair>\t%g1, %0\n\tvpackstoreh<knc_packed_pair>\t%g1, %2";

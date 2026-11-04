@@ -39,6 +39,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "diagnostic-core.h"
 #include "optabs.h"
 #include "cpplib.h"
+#include "targhooks.h"
 
 /* Exactly the packed storage modes in ADR-0005 point 1.  This predicate
    does not advertise arithmetic, an ABI, or automatic vectorization.  */
@@ -63,6 +64,25 @@ ix86_knc_preferred_simd_mode (scalar_mode mode)
     case E_DImode: return V8DImode;
     default: return word_mode;
     }
+}
+
+/* Intel 327364-001 VLOADUNPACKLD p.361: pairs accept element,
+   not arbitrary byte, alignment.  Both SLP and loop vectorization call
+   vect_supportable_dr_alignment, whose is_packed is not_size_aligned:
+   get_object_alignment of the scalar reference must cover its size.
+   Unknown vector misalignment is therefore safe only when !is_packed.  */
+bool
+ix86_knc_support_vector_misalignment (machine_mode mode, int misalignment,
+                                      bool is_packed, bool is_gather_scatter)
+{
+  if (!TARGET_KNC)
+    return default_builtin_support_vector_misalignment
+      (mode, misalignment, is_packed, is_gather_scatter);
+  if (!ix86_knc_packed_mode_p (mode) || is_packed || is_gather_scatter)
+    return false;
+  unsigned int bytes = GET_MODE_SIZE (GET_MODE_INNER (mode));
+  return misalignment == -1
+         || (misalignment >= 0 && misalignment % bytes == 0);
 }
 
 /* Only a packed all-bits-zero constant has an immediate IMCI form.  */
@@ -114,10 +134,30 @@ ix86_knc_expand_packed_move (machine_mode mode, rtx *operands)
   if (MEM_P (operands[0]) && !REG_P (operands[1]))
     operands[1] = force_reg (mode, operands[1]);
   rtx mem = MEM_P (operands[0]) ? operands[0] : operands[1];
+  if (MEM_P (mem)
+      && MEM_ALIGN (mem) < GET_MODE_BITSIZE (GET_MODE_INNER (mode)))
+    {
+      /* Integer moves permit byte alignment and touch exactly the payload.
+         Expose all eight transfers and the aligned vector move to RTL;
+         do not use a block copy that could select movmisalign again.  */
+      rtx slot = assign_stack_temp (mode, GET_MODE_SIZE (mode));
+      bool store = MEM_P (operands[0]);
+      if (store)
+        emit_move_insn (slot, operands[1]);
+      for (unsigned int offset = 0; offset < 64; offset += 8)
+        {
+          rtx from = adjust_address (store ? slot : mem, DImode, offset);
+          rtx to = adjust_address (store ? mem : slot, DImode, offset);
+          emit_move_insn (to, force_reg (DImode, from));
+        }
+      if (!store)
+        emit_move_insn (operands[0], slot);
+      return;
+    }
   if (MEM_P (mem) && MEM_ALIGN (mem) < 512)
     {
-      /* S3-03 / Intel 327364-001: a full unmasked pair is safe for a
-	 mapped 64-byte payload.  Keep one logical SET and derive A+64
+      /* S3-03 / Intel 327364-001: a full unmasked pair is safe for an
+	 element-aligned mapped 64-byte payload.  Keep one logical SET and derive A+64
 	 from its MEM at output, so combine cannot separate the halves.
 	 Legalize displacement overflow now, without an output scratch.  */
       rtx addr = XEXP (mem, 0);
