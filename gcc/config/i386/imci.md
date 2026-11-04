@@ -133,9 +133,11 @@
 
 ;; ADR-0007 point 1: 8-lane masks are QI.  Like *knc_movhi, a complete QI
 ;; move ahead of *movqi_internal, whose k alternatives are AVX-512 kmovw or
-;; kmovb.  q, not r, keeps -m32 on byte-addressable registers.  A k register
-;; reaches memory through a GPR (ix86_secondary_reload supplies Q_REGS).
-;; kmov r32,k also copies bits 15:8 of the mask; a QI value never reads them.
+;; kmovb.  GPR destinations are written whole (movl, movzbl), so byte moves
+;; keep the code *movqi_internal gives under KNC's partial-register tuning.
+;; q, not r, keeps -m32 stores on byte registers.  A k register reaches
+;; memory through a GPR (ix86_secondary_reload supplies Q_REGS).  kmov r32,k
+;; also copies bits 15:8 of the mask; a QI value never reads them.
 (define_insn "*knc_movqi"
   [(set (match_operand:QI 0 "nonimmediate_operand"
           "=q,q,q,m,m,?*YK,?r,?*YK")
@@ -143,16 +145,16 @@
           "q,m,n,q,n,r,*YK,*YK"))]
   "TARGET_KNC && !(MEM_P (operands[0]) && MEM_P (operands[1]))"
   "@
-   mov{b}\t{%1, %0|%0, %1}
-   mov{b}\t{%1, %0|%0, %1}
-   mov{b}\t{%1, %0|%0, %1}
+   mov{l}\t{%k1, %k0|%k0, %k1}
+   movz{bl|x}\t{%1, %k0|%k0, %1}
+   mov{l}\t{%k1, %k0|%k0, %k1}
    mov{b}\t{%1, %0|%0, %1}
    mov{b}\t{%1, %0|%0, %1}
    kmov\t{%k1, %0|%0, %k1}
    kmov\t{%1, %k0|%k0, %1}
    kmov\t{%1, %0|%0, %1}"
-  [(set_attr "type" "imov,imov,imov,imov,imov,mskmov,mskmov,mskmov")
-   (set_attr "mode" "QI")])
+  [(set_attr "type" "imov,imovx,imov,imov,imov,mskmov,mskmov,mskmov")
+   (set_attr "mode" "SI,SI,SI,QI,QI,QI,QI,QI")])
 
 (define_insn "knc_store<mode>"
   [(set (match_operand:KNC_SCALAR 0 "memory_operand" "=m")
