@@ -951,7 +951,7 @@
 (define_mode_iterator VI124_256_AVX512F_AVX512BW
   [V32QI V16HI V8SI
    (V64QI "TARGET_AVX512BW") (V32HI "TARGET_AVX512BW")
-   (V16SI "TARGET_AVX512F")])
+   (V16SI "TARGET_AVX512F || TARGET_KNC")])
 (define_mode_iterator VI48_256 [V8SI V4DI])
 (define_mode_iterator VI48_512
   [V16SI V8DI])
@@ -2657,12 +2657,12 @@
   [(set_attr "isa" "noavx,noavx,avx,avx")])
 
 (define_expand "cond_<insn><mode>"
-  [(set (match_operand:VFH 0 "register_operand")
-	(vec_merge:VFH
-	  (plusminus:VFH
-	    (match_operand:VFH 2 "vector_operand")
-	    (match_operand:VFH 3 "vector_operand"))
-	  (match_operand:VFH 4 "nonimm_or_0_operand")
+  [(set (match_operand:VFH_KNC 0 "register_operand")
+	(vec_merge:VFH_KNC
+	  (plusminus:VFH_KNC
+	    (match_operand:VFH_KNC 2 "vector_operand")
+	    (match_operand:VFH_KNC 3 "vector_operand"))
+	  (match_operand:VFH_KNC 4 "nonimm_or_0_operand")
 	  (match_operand:<avx512fmaskmode> 1 "register_operand")))]
   "<MODE_SIZE> == 64 || TARGET_AVX512VL"
 {
@@ -18048,7 +18048,7 @@
 	(maxmin:VI124_256_AVX512F_AVX512BW
 	  (match_operand:VI124_256_AVX512F_AVX512BW 1 "nonimmediate_operand")
 	  (match_operand:VI124_256_AVX512F_AVX512BW 2 "nonimmediate_operand")))]
-  "TARGET_AVX2"
+  "TARGET_AVX2 || ix86_knc_packed_mode_p (<MODE>mode)"
   "ix86_fixup_binary_operands_no_copy (<CODE>, <MODE>mode, operands);")
 
 (define_insn "*avx2_<code><mode>3"
@@ -29610,7 +29610,15 @@
 	    UNSPEC_MASKLOAD)
           (match_operand:V48_AVX512VL 3 "const0_operand")
 	  (match_operand:<avx512fmaskmode> 2 "register_operand")))]
-  "TARGET_AVX512F")
+  "TARGET_AVX512F || ix86_knc_packed_mode_p (<MODE>mode)"
+{
+  if (TARGET_KNC)
+    {
+      emit_insn (gen_knc_maskmove (<MODE>mode, operands[0], operands[1],
+				   operands[2]));
+      DONE;
+    }
+})
 
 (define_expand "maskload<mode><avx512fmaskmodelower>"
   [(set (match_operand:VI12HFBF_AVX512VL 0 "register_operand")
@@ -29638,7 +29646,15 @@
 	   (match_dup 0)
 	   (match_operand:<avx512fmaskmode> 2 "register_operand")]
 	  UNSPEC_MASKMOV))]
-  "TARGET_AVX512F")
+  "TARGET_AVX512F || ix86_knc_packed_mode_p (<MODE>mode)"
+{
+  if (TARGET_KNC)
+    {
+      emit_insn (gen_knc_maskmove (<MODE>mode, operands[0], operands[1],
+				   operands[2]));
+      DONE;
+    }
+})
 
 (define_expand "maskstore<mode><avx512fmaskmodelower>"
   [(set (match_operand:VI12HFBF_AVX512VL 0 "memory_operand")
