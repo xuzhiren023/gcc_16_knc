@@ -84,14 +84,6 @@
 (define_register_constraint "k" "TARGET_AVX512F ? ALL_MASK_REGS : NO_REGS"
 "@internal Any mask register.")
 
-;; KNC storage classes do not enable SSE or AVX instruction alternatives.
-(define_register_constraint "YJ" "TARGET_KNC ? ALL_SSE_REGS : NO_REGS"
- "@internal KNC zmm storage register.")
-(define_register_constraint "YK" "TARGET_KNC ? ALL_MASK_REGS : NO_REGS"
- "@internal KNC mask transport register.")
-(define_register_constraint "YL" "TARGET_KNC ? MASK_REGS : NO_REGS"
- "@internal KNC nonzero predicate register.")
-
 ;; Vector registers (also used for plain floating point nowadays).
 (define_register_constraint "y" "TARGET_MMX ? MMX_REGS : NO_REGS"
  "Any MMX register.")

@@ -34,6 +34,11 @@ along with GCC; see the file COPYING3.  If not see
 #include "explow.h"
 #include "expr.h"
 #include "varasm.h"
+#include "target.h"
+#include "regs.h"
+#include "diagnostic-core.h"
+#include "optabs.h"
+#include "cpplib.h"
 
 /* Exactly the packed storage modes in ADR-0005 point 1.  This predicate
    does not advertise arithmetic, an ABI, or automatic vectorization.  */
@@ -193,3 +198,179 @@ ix86_knc_expand_vector_init (rtx target, rtx vals)
 		    XVECEXP (vals, 0, i));
   emit_move_insn (target, mem);
 }
+
+/* KNC has no CMPXCHG16B (Intel 327364-001, Appendix B).  Keep the
+   libatomic call and its expected-value temporary visible in RTL.
+   Do not add atomic_loadti: TI loads are not lock-free, and __atomic
+   operations must continue to use the matching libatomic implementation.  */
+void
+ix86_expand_knc_cas (rtx *operands)
+{
+  rtx expected = assign_stack_temp (TImode, 16);
+  emit_move_insn (expected, operands[3]);
+  rtx_mode_t args[] = {
+    rtx_mode_t (XEXP (operands[2], 0), Pmode),
+    rtx_mode_t (XEXP (expected, 0), Pmode),
+    rtx_mode_t (operands[4], TImode),
+    rtx_mode_t (GEN_INT (INTVAL (operands[6]) & MEMMODEL_BASE_MASK), SImode),
+    rtx_mode_t (GEN_INT (INTVAL (operands[7]) & MEMMODEL_BASE_MASK), SImode)
+  };
+  rtx result = emit_library_call_value_1 (
+    1, init_one_libfunc ("__atomic_compare_exchange_16"), NULL_RTX,
+    LCT_NORMAL, QImode, 5, args);
+  emit_move_insn (operands[0], result);
+  emit_move_insn (operands[1], expected);
+}
+
+/* KNC ABI registers are storage, not an SSE arithmetic bank.  The
+   expander exposes the memory bridge and allocated mask to the RTL.  */
+bool
+ix86_knc_expand_move (rtx op0, rtx op1)
+{
+  if (SSE_REG_P (op0) || SSE_REG_P (op1))
+    {
+      switch (GET_MODE (op0))
+	{
+	case SFmode: emit_insn (gen_knc_movesf (op0, op1)); return true;
+	case DFmode: emit_insn (gen_knc_movedf (op0, op1)); return true;
+	case SImode: emit_insn (gen_knc_movesi (op0, op1)); return true;
+	case DImode: emit_insn (gen_knc_movedi (op0, op1)); return true;
+	case TImode: emit_insn (gen_knc_moveti (op0, op1)); return true;
+	case TFmode: emit_insn (gen_knc_movetf (op0, op1)); return true;
+	default: break;
+	}
+    }
+  return false;
+}
+
+/* KNC shares generic costs, but has no generic x86 arch macro.  */
+enum processor_type
+ix86_knc_target_macros (cpp_reader *reader,
+			void (*def_or_undef) (cpp_reader *, const char *))
+{
+  def_or_undef (reader, "__KNC__");
+  def_or_undef (reader, "__k1om__");
+  def_or_undef (reader, "__k1om");
+  return PROCESSOR_max;
+}
+
+/* ADR-0002: check after common handling expands ISA dependencies.  */
+bool
+ix86_knc_option_override (struct gcc_options *opts)
+{
+  opts->x_ix86_isa_flags |= OPTION_MASK_ISA_KNC;
+  if (opts->x_ix86_isa_flags
+      & (OPTION_MASK_ISA_SSE | OPTION_MASK_ISA_MMX
+         | OPTION_MASK_ISA_AVX | OPTION_MASK_ISA_AVX512F))
+    {
+      error ("SSE, AVX and MMX options are not supported with "
+             "%<-march=knc%>");
+      return false;
+    }
+  return true;
+}
+
+/* KNC scalar transport admits XImode, but its packed vector ABI belongs
+   to E3.  Reject these vector types before recursive ABI classification.  */
+bool
+ix86_knc_check_abi_type (const_tree type, machine_mode mode)
+{
+  if (!ix86_knc_unsupported_abi_type_p (type, mode))
+    return true;
+  error ("unsupported KNC register ABI mode");
+  return false;
+}
+
+/* Diagnose unsupported SSE vector/half/decimal ABI containers before a
+   hard register is constructed.  The classifier's private enum stays shared.  */
+bool
+ix86_knc_check_abi_mode (machine_mode mode, bool half_class)
+{
+  if (!VECTOR_MODE_P (mode)
+      && !DECIMAL_FLOAT_MODE_P (GET_MODE_INNER (mode))
+      && GET_MODE_INNER (mode) != HFmode
+      && GET_MODE_INNER (mode) != BFmode && !half_class)
+    return true;
+  error ("unsupported KNC register ABI mode");
+  return false;
+}
+
+unsigned int
+ix86_knc_libcall_result_regno (machine_mode mode, unsigned int regno)
+{
+  if (regno == FIRST_SSE_REG
+      && mode != SFmode && mode != DFmode && mode != TFmode)
+    {
+      error ("unsupported KNC libcall result mode");
+      return AX_REG;
+    }
+  return regno;
+}
+
+/* Scalar modes transported through KNC's visible memory bridge.  */
+static bool
+knc_scalar_transport_mode_p (machine_mode mode)
+{
+  return mode == SFmode || mode == DFmode || mode == SImode
+         || mode == DImode || mode == TImode || mode == TFmode;
+}
+
+bool
+ix86_knc_output_reload_p (machine_mode mode, reg_class_t regclass)
+{
+  return SSE_CLASS_P (regclass)
+         && (knc_scalar_transport_mode_p (mode) || mode == XImode);
+}
+
+/* Use the secondary reload expander, retaining its optimizer-visible memory
+   cost in inline_secondary_memory_needed for ix86_register_move_cost.  */
+bool
+ix86_knc_reload_memory_bridge_p (machine_mode mode, reg_class_t class1,
+				reg_class_t class2)
+{
+  return SSE_CLASS_P (class1) != SSE_CLASS_P (class2)
+         && knc_scalar_transport_mode_p (mode);
+}
+
+bool
+ix86_knc_hard_regno_mode_ok (unsigned int regno, machine_mode mode)
+{
+  if (MASK_REGNO_P (regno))
+    return mode == HImode;
+  return knc_scalar_transport_mode_p (mode)
+         || ix86_knc_packed_mode_p (mode) || mode == XImode;
+}
+
+/* GCC 16 passes unstripped register or SUBREG operands here.  Keep the complete
+   memory bridge in the expander, with an allocated mask materialization
+   scratch (ADR-0004), rather than the donor's deleted memory store.  */
+bool
+ix86_knc_secondary_reload (bool in_p, rtx x, reg_class_t rclass,
+			   machine_mode mode, secondary_reload_info *sri)
+{
+  int knc_regno = true_regnum (x);
+  if (knc_regno >= 0 && knc_regno < FIRST_PSEUDO_REGISTER
+      && SSE_CLASS_P (rclass) != SSE_REGNO_P (knc_regno))
+    {
+      bool to_vector = in_p ? SSE_CLASS_P (rclass)
+			   : SSE_REGNO_P (knc_regno);
+      switch (mode)
+	{
+#define KNC_RELOAD(M, m) \
+	case M##mode: sri->icode = (to_vector ? CODE_FOR_knc_reload_in##m \
+					: CODE_FOR_knc_reload_out##m); break
+	KNC_RELOAD (SF, sf);
+	KNC_RELOAD (DF, df);
+	KNC_RELOAD (SI, si);
+	KNC_RELOAD (DI, di);
+	KNC_RELOAD (TI, ti);
+	KNC_RELOAD (TF, tf);
+#undef KNC_RELOAD
+	default: return true;
+	}
+      sri->extra_cost = to_vector ? 2 : 4;
+      return true;
+    }
+  return false;
+}
+

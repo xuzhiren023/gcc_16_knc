@@ -2174,21 +2174,10 @@ ix86_option_override_internal (bool main_args_p,
   else
     ix86_arch_specified = 1;
 
-  /* ADR-0002: IMCI is independent of SSE, AVX and MMX.  Check after
-     common option handling has expanded the ISA option dependencies.  */
-  if (!strcmp (opts->x_ix86_arch_string, "knc")
-      || TARGET_KNC_P (opts->x_ix86_isa_flags))
-    {
-      opts->x_ix86_isa_flags |= OPTION_MASK_ISA_KNC;
-      if (opts->x_ix86_isa_flags
-	  & (OPTION_MASK_ISA_SSE | OPTION_MASK_ISA_MMX
-	     | OPTION_MASK_ISA_AVX | OPTION_MASK_ISA_AVX512F))
-	{
-	  error ("SSE, AVX and MMX options are not supported with "
-		 "%<-march=knc%>");
-	  return false;
-	}
-    }
+  if ((!strcmp (opts->x_ix86_arch_string, "knc")
+       || TARGET_KNC_P (opts->x_ix86_isa_flags))
+      && !ix86_knc_option_override (opts))
+    return false;
 
   if (opts_set->x_ix86_pmode)
     {
