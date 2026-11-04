@@ -532,6 +532,9 @@
 ;; Intel 327364-001 VCMPPS/VCMPPD and VPCMPD/VPCMPUD.  Operand 3 is KNC's
 ;; 3-bit predicate (ix86_knc_expand_mask_vec_cmp), not AVX-512's 5-bit one.
 ;; The 8-lane forms write zero to bits 15:8 of the mask.
+;; Unsigned compares use UNSPEC_KNC_UCMP: sse.md's UNSPEC_UNSIGNED_PCMP is
+;; declared after this file is read.
+(define_c_enum "unspec" [UNSPEC_KNC_UCMP])
 (define_insn "*knc_cmp<mode>"
   [(set (match_operand:<knc_maskmode> 0 "register_operand" "=YK")
 	(unspec:<knc_maskmode>
@@ -551,7 +554,7 @@
 	  [(match_operand:V16SI 1 "register_operand" "YJ")
 	   (match_operand:V16SI 2 "nonimmediate_operand" "YJBm")
 	   (match_operand:SI 3 "const_0_to_7_operand")]
-	  UNSPEC_UNSIGNED_PCMP))]
+	  UNSPEC_KNC_UCMP))]
   "TARGET_KNC"
   "vpcmpud\t{%3, %g2, %g1, %0|%0, %g1, %g2, %3}"
   [(set_attr "type" "ssecmp")

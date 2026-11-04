@@ -540,7 +540,7 @@ ix86_knc_expand_mask_vec_cmp (rtx dest, enum rtx_code code, rtx op0, rtx op1)
   bool unsigned_p = code == LTU || code == LEU || code == GTU || code == GEU;
   rtx cmp = gen_rtx_UNSPEC (GET_MODE (dest),
 			    gen_rtvec (3, op0, op1, GEN_INT (imm)),
-			    unsigned_p ? UNSPEC_UNSIGNED_PCMP : UNSPEC_PCMP);
+			    unsigned_p ? UNSPEC_KNC_UCMP : UNSPEC_PCMP);
   emit_insn (gen_rtx_SET (dest, cmp));
   return true;
 }
