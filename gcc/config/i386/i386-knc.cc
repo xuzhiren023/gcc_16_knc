@@ -51,6 +51,14 @@ ix86_knc_packed_mode_p (machine_mode mode)
 	     || mode == V16SImode || mode == V8DImode);
 }
 
+/* V4SF is only the shared SysV varargs save loop's 16-byte transport.
+   It does not enable SSE arithmetic or change the packed storage modes.  */
+bool
+ix86_knc_vector_move_mode_p (machine_mode mode)
+{
+  return ix86_knc_packed_mode_p (mode) || (TARGET_KNC && mode == V4SFmode);
+}
+
 /* ADR-0005 point 5: try one full ZMM vector size.  Unsupported scalar
    types retain word_mode; tails and peeling use the scalar expanders.  */
 machine_mode
@@ -133,8 +141,19 @@ ix86_knc_unsupported_abi_type_p (const_tree type, machine_mode mode)
 /* Keep constants and memory transfers visible to allocation and costing.
    Pool entries have the packed mode's natural 512-bit alignment.  */
 void
-ix86_knc_expand_packed_move (machine_mode mode, rtx *operands)
+ix86_knc_expand_vector_move (machine_mode mode, rtx *operands)
 {
+  if (mode == V4SFmode)
+    {
+      /* Keep the donor's 16-byte save slots and TI transport (ADR-0004).
+         Expansion stays after the shared loop's AL test, so the scratch
+         definitions and the resulting save sequence are unchanged.  */
+      gcc_assert (MEM_P (operands[0]) && SSE_REG_P (operands[1]));
+      emit_insn (gen_knc_save_varargs
+		 (adjust_address (operands[0], TImode, 0),
+		  gen_rtx_REG (TImode, REGNO (operands[1]))));
+      return;
+    }
   gcc_assert (ix86_knc_packed_mode_p (mode));
   if (CONSTANT_P (operands[1])
       && !ix86_knc_zero_constant_p (operands[1], mode))
@@ -301,11 +320,25 @@ ix86_knc_expand_move (rtx op0, rtx op1)
   return false;
 }
 
+/* KNC cannot implement register clearing using the shared SSE sequences.  */
+HARD_REG_SET
+ix86_knc_zero_call_used_regs (HARD_REG_SET /* need_zeroed_hardregs */)
+{
+  HARD_REG_SET zeroed_hardregs;
+  CLEAR_HARD_REG_SET (zeroed_hardregs);
+  error ("zero-call-used-regs is unsupported for KNC");
+  return zeroed_hardregs;
+}
+
 /* KNC shares generic costs, but has no generic x86 arch macro.  */
 enum processor_type
 ix86_knc_target_macros (cpp_reader *reader,
 			void (*def_or_undef) (cpp_reader *, const char *))
 {
+  /* c-family/c-cppbuiltin.cc defines the atomic macros before calling the
+     target builtins hook.  Our TI CAS expander uses lock-based libatomic,
+     so its presence does not mean native 16-byte CAS is available.  */
+  cpp_undef (reader, "__GCC_HAVE_SYNC_COMPARE_AND_SWAP_16");
   def_or_undef (reader, "__KNC__");
   def_or_undef (reader, "__k1om__");
   def_or_undef (reader, "__k1om");

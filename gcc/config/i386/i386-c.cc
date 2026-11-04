@@ -907,12 +907,6 @@ ix86_pragma_target_parse (tree args, tree pop_target)
 void
 ix86_target_macros (void)
 {
-  /* The KNC TI CAS expander uses lock-based libatomic calls.  The generic
-     c-family/c-cppbuiltin.cc check sees the expander, but its presence does
-     not mean native 16-byte compare-and-swap is available.  */
-  if (TARGET_KNC)
-    cpp_undef (parse_in, "__GCC_HAVE_SYNC_COMPARE_AND_SWAP_16");
-
   /* 32/64-bit won't change with target specific options, so do the assert and
      builtin_define_std calls here.  */
   if (TARGET_64BIT)

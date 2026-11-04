@@ -4076,17 +4076,15 @@ zero_all_mm_registers (HARD_REG_SET need_zeroed_hardregs,
 static HARD_REG_SET
 ix86_zero_call_used_regs (HARD_REG_SET need_zeroed_hardregs)
 {
+  if (TARGET_KNC)
+    return ix86_knc_zero_call_used_regs (need_zeroed_hardregs);
+
   HARD_REG_SET zeroed_hardregs;
   bool all_sse_zeroed = false;
   int all_st_zeroed_num = 0;
   bool all_mm_zeroed = false;
 
   CLEAR_HARD_REG_SET (zeroed_hardregs);
-  if (TARGET_KNC)
-    {
-      error ("zero-call-used-regs is unsupported for KNC");
-      return zeroed_hardregs;
-    }
 
   /* first, let's see whether we can zero all vector registers together.  */
   rtx zero_all_vec_insn = zero_all_vector_registers (need_zeroed_hardregs);
@@ -4727,9 +4725,7 @@ setup_incoming_varargs_64 (CUMULATIVE_ARGS *cum)
 	 we used movdqa (i.e. TImode) instead?  Perhaps even better would
 	 be if we could determine the real mode of the data, via a hook
 	 into pass_stdarg.  Ignore all that for now.  */
-      /* KNC keeps the donor's 16-byte slots through TI transport (ADR-0004).
-         The AL test above must precede the transport's scratch definitions.  */
-      smode = TARGET_KNC ? TImode : V4SFmode;
+      smode = V4SFmode;
       if (crtl->stack_alignment_needed < GET_MODE_ALIGNMENT (smode))
 	crtl->stack_alignment_needed = GET_MODE_ALIGNMENT (smode);
 
@@ -4746,11 +4742,7 @@ setup_incoming_varargs_64 (CUMULATIVE_ARGS *cum)
 	  set_mem_alias_set (mem, set);
 	  set_mem_align (mem, GET_MODE_ALIGNMENT (smode));
 
-	  rtx reg = gen_rtx_REG (smode, GET_SSE_REGNO (i));
-	  if (TARGET_KNC)
-	    emit_insn (gen_knc_save_varargs (mem, reg));
-	  else
-	    emit_move_insn (mem, reg);
+	  emit_move_insn (mem, gen_rtx_REG (smode, GET_SSE_REGNO (i)));
 	}
 
       emit_label (label);

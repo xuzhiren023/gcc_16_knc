@@ -1462,11 +1462,11 @@
 (define_expand "mov<mode>"
   [(set (match_operand:VMOVE_KNC 0 "nonimmediate_operand")
 	(match_operand:VMOVE_KNC 1 "nonimmediate_or_sse_const_operand"))]
-  "TARGET_SSE || ix86_knc_packed_mode_p (<MODE>mode)"
+  "TARGET_SSE || ix86_knc_vector_move_mode_p (<MODE>mode)"
 {
   if (TARGET_KNC)
     {
-      ix86_knc_expand_packed_move (<MODE>mode, operands);
+      ix86_knc_expand_vector_move (<MODE>mode, operands);
       DONE;
     }
   ix86_expand_vector_move (<MODE>mode, operands);
@@ -1959,7 +1959,7 @@
 {
   if (TARGET_KNC)
     {
-      ix86_knc_expand_packed_move (<MODE>mode, operands);
+      ix86_knc_expand_vector_move (<MODE>mode, operands);
       DONE;
     }
   ix86_expand_vector_move_misalign (<MODE>mode, operands);
