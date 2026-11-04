@@ -25,6 +25,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "backend.h"
 #include "rtl.h"
 #include "tree.h"
+#include "gimple-expr.h"
 #include "memmodel.h"
 #include "tm_p.h"
 #include "emit-rtl.h"
@@ -391,6 +392,18 @@ ix86_knc_check_abi_type (const_tree type, machine_mode mode)
     return true;
   error ("unsupported KNC register ABI mode");
   return false;
+}
+
+/* Keep va_arg expansion well formed after the ABI diagnostic, like the
+   typed result retained by aarch64_gimplify_va_arg_expr after
+   aarch64_err_no_fpadvsimd.  Generic gimplify_va_arg_expr likewise keeps
+   a result of the requested type on its invalid promoted-type path.  */
+tree
+ix86_knc_va_arg_error (tree type)
+{
+  if (AGGREGATE_TYPE_P (type))
+    return create_tmp_var (type, "va_arg_tmp");
+  return build_zero_cst (type);
 }
 
 /* Diagnose unsupported SSE vector/half/decimal ABI containers before a

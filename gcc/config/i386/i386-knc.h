@@ -43,6 +43,7 @@ extern enum processor_type ix86_knc_target_macros
   (struct cpp_reader *, void (*) (struct cpp_reader *, const char *));
 extern bool ix86_knc_option_override (struct gcc_options *);
 extern bool ix86_knc_check_abi_type (const_tree, machine_mode);
+extern tree ix86_knc_va_arg_error (tree);
 extern bool ix86_knc_check_abi_mode (machine_mode, bool);
 extern unsigned int ix86_knc_libcall_result_regno (machine_mode, unsigned int);
 extern bool ix86_knc_output_reload_p (machine_mode, reg_class_t);
