@@ -19,6 +19,8 @@ along with GCC; see the file COPYING3.  If not see
 #ifndef GCC_I386_KNC_H
 #define GCC_I386_KNC_H
 
+struct HARD_REG_SET;
+
 extern bool ix86_knc_packed_mode_p (machine_mode);
 extern bool ix86_knc_vector_move_mode_p (machine_mode);
 extern machine_mode ix86_knc_preferred_simd_mode (scalar_mode);
