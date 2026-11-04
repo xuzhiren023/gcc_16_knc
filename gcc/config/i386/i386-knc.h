@@ -29,4 +29,30 @@ extern void ix86_knc_fixup_binary_operands (machine_mode, rtx *);
 extern void ix86_knc_expand_vector_init (rtx, rtx);
 extern void ix86_knc_expand_duplicate (rtx, rtx);
 
+extern void ix86_expand_knc_cas (rtx *);
+extern bool ix86_knc_expand_move (rtx, rtx);
+extern enum processor_type ix86_knc_target_macros
+  (struct cpp_reader *, void (*) (struct cpp_reader *, const char *));
+extern bool ix86_knc_option_override (struct gcc_options *);
+extern bool ix86_knc_check_abi_type (const_tree, machine_mode);
+extern bool ix86_knc_check_abi_mode (machine_mode, bool);
+extern unsigned int ix86_knc_libcall_result_regno (machine_mode, unsigned int);
+extern bool ix86_knc_output_reload_p (machine_mode, reg_class_t);
+extern bool ix86_knc_reload_memory_bridge_p (machine_mode, reg_class_t, reg_class_t);
+extern bool ix86_knc_hard_regno_mode_ok (unsigned int, machine_mode);
+extern bool ix86_knc_secondary_reload (bool, rtx, reg_class_t, machine_mode,
+				       struct secondary_reload_info *);
+
+/* Keep the ABI classifier's private enum in i386.cc.  */
+template <typename RegClass>
+bool
+ix86_knc_check_abi_container (machine_mode mode, int n, const RegClass *classes,
+			     RegClass half_class)
+{
+  bool half = false;
+  for (int i = 0; i < n; ++i)
+    half |= classes[i] == half_class;
+  return ix86_knc_check_abi_mode (mode, half);
+}
+
 #endif /* GCC_I386_KNC_H */
