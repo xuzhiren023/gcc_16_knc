@@ -19,20 +19,24 @@ along with GCC; see the file COPYING3.  If not see
 #ifndef GCC_I386_KNC_H
 #define GCC_I386_KNC_H
 
+struct HARD_REG_SET;
+
 extern bool ix86_knc_packed_mode_p (machine_mode);
+extern bool ix86_knc_vector_move_mode_p (machine_mode);
 extern machine_mode ix86_knc_preferred_simd_mode (scalar_mode);
 extern bool ix86_knc_support_vector_misalignment (machine_mode, int, bool, bool);
 
 extern bool ix86_knc_element_aligned_mem_p (rtx, machine_mode);
 extern bool ix86_knc_zero_constant_p (rtx, machine_mode);
 extern bool ix86_knc_unsupported_abi_type_p (const_tree, machine_mode);
-extern void ix86_knc_expand_packed_move (machine_mode, rtx *);
+extern void ix86_knc_expand_vector_move (machine_mode, rtx *);
 extern void ix86_knc_fixup_binary_operands (machine_mode, rtx *);
 extern void ix86_knc_expand_vector_init (rtx, rtx);
 extern void ix86_knc_expand_duplicate (rtx, rtx);
 
 extern void ix86_expand_knc_cas (rtx *);
 extern bool ix86_knc_expand_move (rtx, rtx);
+extern HARD_REG_SET ix86_knc_zero_call_used_regs (HARD_REG_SET);
 extern enum processor_type ix86_knc_target_macros
   (struct cpp_reader *, void (*) (struct cpp_reader *, const char *));
 extern bool ix86_knc_option_override (struct gcc_options *);
