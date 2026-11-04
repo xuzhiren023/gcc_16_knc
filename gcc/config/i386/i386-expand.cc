@@ -370,21 +370,8 @@ ix86_expand_move (machine_mode mode, rtx operands[])
   op0 = operands[0];
   op1 = operands[1];
 
-  /* KNC ABI registers are storage, not an SSE arithmetic bank.  The
-     expander exposes the memory bridge and allocated mask to the RTL.  */
-  if (TARGET_KNC && (SSE_REG_P (op0) || SSE_REG_P (op1)))
-    {
-      switch (mode)
-	{
-	case SFmode: emit_insn (gen_knc_movesf (op0, op1)); return;
-	case DFmode: emit_insn (gen_knc_movedf (op0, op1)); return;
-	case SImode: emit_insn (gen_knc_movesi (op0, op1)); return;
-	case DImode: emit_insn (gen_knc_movedi (op0, op1)); return;
-	case TImode: emit_insn (gen_knc_moveti (op0, op1)); return;
-	case TFmode: emit_insn (gen_knc_movetf (op0, op1)); return;
-	default: break;
-	}
-    }
+  if (TARGET_KNC && ix86_knc_expand_move (op0, op1))
+    return;
 
   /* Avoid complex sets of likely spilled hard registers before reload.  */
   if (!ix86_hardreg_mov_ok (op0, op1))
@@ -26924,29 +26911,6 @@ ix86_expand_atomic_fetch_op_loop (rtx target, rtx mem, rtx val,
 			    gen_int_mode (MEMMODEL_SYNC_SEQ_CST,
 					  SImode),
 			    doubleword, loop_label);
-}
-
-/* KNC has no CMPXCHG16B (Intel 327364-001, Appendix B).  Keep the
-   libatomic call and its expected-value temporary visible in RTL.
-   Do not add atomic_loadti: TI loads are not lock-free, and __atomic
-   operations must continue to use the matching libatomic implementation.  */
-void
-ix86_expand_knc_cas (rtx *operands)
-{
-  rtx expected = assign_stack_temp (TImode, 16);
-  emit_move_insn (expected, operands[3]);
-  rtx_mode_t args[] = {
-    rtx_mode_t (XEXP (operands[2], 0), Pmode),
-    rtx_mode_t (XEXP (expected, 0), Pmode),
-    rtx_mode_t (operands[4], TImode),
-    rtx_mode_t (GEN_INT (INTVAL (operands[6]) & MEMMODEL_BASE_MASK), SImode),
-    rtx_mode_t (GEN_INT (INTVAL (operands[7]) & MEMMODEL_BASE_MASK), SImode)
-  };
-  rtx result = emit_library_call_value_1 (
-    1, init_one_libfunc ("__atomic_compare_exchange_16"), NULL_RTX,
-    LCT_NORMAL, QImode, 5, args);
-  emit_move_insn (operands[0], result);
-  emit_move_insn (operands[1], expected);
 }
 
 /* Relax cmpxchg instruction, param loop_label indicates whether

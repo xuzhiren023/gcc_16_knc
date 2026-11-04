@@ -45,13 +45,7 @@ ix86_target_macros_internal (HOST_WIDE_INT isa_flag,
 						   const char *))
 {
   if (isa_flag & OPTION_MASK_ISA_KNC)
-    {
-      def_or_undef (parse_in, "__KNC__");
-      def_or_undef (parse_in, "__k1om__");
-      def_or_undef (parse_in, "__k1om");
-      /* KNC shares generic costs, but has no generic x86 arch macro.  */
-      arch = PROCESSOR_max;
-    }
+    arch = ix86_knc_target_macros (parse_in, def_or_undef);
 
   /* For some of the k6/pentium varients there weren't separate ISA bits to
      identify which tune/arch flag was passed, so figure it out here.  */

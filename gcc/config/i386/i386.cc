@@ -2257,14 +2257,8 @@ classify_argument (machine_mode mode, const_tree type,
 		   enum x86_64_reg_class classes[MAX_CLASSES], int bit_offset,
 		   int &zero_width_bitfields)
 {
-  /* KNC scalar transport admits XImode, but its packed vector ABI belongs
-     to E3.  Reject vector types with XImode before classification,
-     including recursive classification of aggregate fields.  */
-  if (TARGET_KNC && ix86_knc_unsupported_abi_type_p (type, mode))
-    {
-      error ("unsupported KNC register ABI mode");
-      return 0;
-    }
+  if (TARGET_KNC && !ix86_knc_check_abi_type (type, mode))
+    return 0;
 
   HOST_WIDE_INT bytes
     = mode == BLKmode ? int_size_in_bytes (type) : (int) GET_MODE_SIZE (mode);
@@ -2829,22 +2823,9 @@ construct_container (machine_mode mode, machine_mode orig_mode,
   if (needed_intregs > nintregs || needed_sseregs > nsseregs)
     return NULL;
 
-  /* Sprint 2 exposes scalar storage only, not SSE vector/half/decimal
-     modes.  Diagnose an unsupported ABI before constructing a hard reg.  */
-  if (TARGET_KNC && needed_sseregs)
-    {
-      bool unsupported = (VECTOR_MODE_P (mode)
-			  || DECIMAL_FLOAT_MODE_P (GET_MODE_INNER (mode))
-                          || GET_MODE_INNER (mode) == HFmode
-                          || GET_MODE_INNER (mode) == BFmode);
-      for (i = 0; i < n; ++i)
-        unsupported |= regclass[i] == X86_64_SSEHF_CLASS;
-      if (unsupported)
-        {
-          error ("unsupported KNC register ABI mode");
-          return NULL;
-        }
-    }
+  if (TARGET_KNC && needed_sseregs
+      && !ix86_knc_check_abi_container (mode, n, regclass, X86_64_SSEHF_CLASS))
+    return NULL;
 
   /* We allowed the user to turn off SSE for kernel mode.  Don't crash if
      some less clueful developer tries to use floating-point anyway.  */
@@ -4333,12 +4314,8 @@ function_value_64 (machine_mode orig_mode, machine_mode mode,
 	  regno = AX_REG;
 	}
 
-      if (TARGET_KNC && regno == FIRST_SSE_REG
-          && mode != SFmode && mode != DFmode && mode != TFmode)
-        {
-          error ("unsupported KNC libcall result mode");
-          regno = AX_REG;
-        }
+      if (TARGET_KNC)
+        regno = ix86_knc_libcall_result_regno (mode, regno);
       return gen_rtx_REG (mode, regno);
     }
   else if (POINTER_TYPE_P (valtype))
@@ -21188,10 +21165,7 @@ ix86_preferred_output_reload_class (rtx x, reg_class_t regclass)
      math on.  If we would like not to return a subset of CLASS, reject this
      alternative: if reload cannot do this, it will still use its choice.  */
   machine_mode mode = GET_MODE (x);
-  if (TARGET_KNC && SSE_CLASS_P (regclass)
-      && (mode == SFmode || mode == DFmode || mode == SImode
-          || mode == DImode || mode == TImode || mode == TFmode
-          || mode == XImode))
+  if (TARGET_KNC && ix86_knc_output_reload_p (mode, regclass))
     return regclass;
   if (SSE_FLOAT_MODE_P (mode) && TARGET_SSE_MATH)
     return MAYBE_SSE_CLASS_P (regclass) ? ALL_SSE_REGS : NO_REGS;
@@ -21206,32 +21180,8 @@ static reg_class_t
 ix86_secondary_reload (bool in_p, rtx x, reg_class_t rclass,
 		       machine_mode mode, secondary_reload_info *sri)
 {
-  /* GCC 16 passes unstripped register or SUBREG operands here.  Keep the complete
-     memory bridge in the expander, with an allocated mask materialization
-     scratch (ADR-0004), rather than the donor's deleted memory store.  */
-  int knc_regno = TARGET_KNC ? true_regnum (x) : -1;
-  if (TARGET_KNC && knc_regno >= 0 && knc_regno < FIRST_PSEUDO_REGISTER
-      && SSE_CLASS_P (rclass) != SSE_REGNO_P (knc_regno))
-    {
-      bool to_vector = in_p ? SSE_CLASS_P (rclass)
-			   : SSE_REGNO_P (knc_regno);
-      switch (mode)
-	{
-#define KNC_RELOAD(M, m) \
-	case M##mode: sri->icode = (to_vector ? CODE_FOR_knc_reload_in##m \
-					: CODE_FOR_knc_reload_out##m); break
-	KNC_RELOAD (SF, sf);
-	KNC_RELOAD (DF, df);
-	KNC_RELOAD (SI, si);
-	KNC_RELOAD (DI, di);
-	KNC_RELOAD (TI, ti);
-	KNC_RELOAD (TF, tf);
-#undef KNC_RELOAD
-	default: return NO_REGS;
-	}
-      sri->extra_cost = to_vector ? 2 : 4;
-      return NO_REGS;
-    }
+  if (TARGET_KNC && ix86_knc_secondary_reload (in_p, x, rclass, mode, sri))
+    return NO_REGS;
 
   /* Double-word spills from general registers to non-offsettable memory
      references (zero-extended addresses) require special handling.  */
@@ -21481,11 +21431,7 @@ static bool
 ix86_secondary_memory_needed (machine_mode mode, reg_class_t class1,
 			      reg_class_t class2)
 {
-  /* Use KNC's secondary reload expander, but retain the memory cost in
-     inline_secondary_memory_needed for ix86_register_move_cost.  */
-  if (TARGET_KNC && SSE_CLASS_P (class1) != SSE_CLASS_P (class2)
-      && (mode == SFmode || mode == DFmode || mode == SImode
-	  || mode == DImode || mode == TImode || mode == TFmode))
+  if (TARGET_KNC && ix86_knc_reload_memory_bridge_p (mode, class1, class2))
     return false;
   return inline_secondary_memory_needed (mode, class1, class2, true);
 }
@@ -21894,13 +21840,8 @@ ix86_hard_regno_mode_ok (unsigned int regno, machine_mode mode)
     return false;
   if (STACK_REGNO_P (regno))
     return VALID_FP_MODE_P (mode);
-  if (TARGET_KNC && MASK_REGNO_P (regno))
-    return mode == HImode;
-  if (TARGET_KNC && SSE_REGNO_P (regno))
-    return mode == SFmode || mode == DFmode || mode == SImode
-           || mode == DImode || mode == TImode || mode == TFmode
-	   || ix86_knc_packed_mode_p (mode)
-           || mode == XImode;
+  if (TARGET_KNC && (MASK_REGNO_P (regno) || SSE_REGNO_P (regno)))
+    return ix86_knc_hard_regno_mode_ok (regno, mode);
   if (MASK_REGNO_P (regno))
     {
       /* Register pair only starts at even register number.  */

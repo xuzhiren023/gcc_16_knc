@@ -4,6 +4,26 @@
 ;; Transfers use UNSPEC to retain the memory bridge: forwarding a SET into
 ;; a plain x87/zmm register copy would require an unavailable instruction.
 
+;; KNC storage classes do not enable SSE or AVX instruction alternatives.
+(define_register_constraint "YJ" "TARGET_KNC ? ALL_SSE_REGS : NO_REGS"
+ "@internal KNC zmm storage register.")
+(define_register_constraint "YK" "TARGET_KNC ? ALL_MASK_REGS : NO_REGS"
+ "@internal KNC mask transport register.")
+(define_register_constraint "YL" "TARGET_KNC ? MASK_REGS : NO_REGS"
+ "@internal KNC nonzero predicate register.")
+
+;; Shared move expanders retain their original SSE modes as well as KNC.
+(define_mode_iterator VMOVE_KNC
+  [(V64QI "TARGET_AVX512F") (V32QI "TARGET_AVX") V16QI
+   (V32HI "TARGET_AVX512F") (V16HI "TARGET_AVX") V8HI
+   (V16SI "TARGET_AVX512F || TARGET_KNC") (V8SI "TARGET_AVX") V4SI
+   (V8DI "TARGET_AVX512F || TARGET_KNC")  (V4DI "TARGET_AVX") V2DI
+   (V4TI "TARGET_AVX512F") (V2TI "TARGET_AVX") V1TI
+   (V32HF "TARGET_AVX512F") (V16HF "TARGET_AVX") V8HF
+   (V32BF "TARGET_AVX512F") (V16BF "TARGET_AVX") V8BF
+   (V16SF "TARGET_AVX512F || TARGET_KNC") (V8SF "TARGET_AVX") V4SF
+   (V8DF "TARGET_AVX512F || TARGET_KNC")  (V4DF "TARGET_AVX") V2DF])
+
 (define_mode_iterator KNC_SCALAR [SF DF SI DI TI TF])
 (define_mode_iterator KNC_BROADCAST [SF DF SI DI])
 (define_mode_iterator KNC_PAIR [TI TF])
