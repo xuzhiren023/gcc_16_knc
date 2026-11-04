@@ -56,7 +56,7 @@ case "${$2}" in
 
     # Some targets support both -fPIC and -fpic, but prefer the latter.
     # FIXME: Why?
-    i[[34567]]86-*-* | x86_64-*-*)
+    i[[34567]]86-*-* | x86_64-*-* | k1om-*-linux*)
 	$1=-fpic
 	;;
     # FIXME: Override -fPIC default in libgcc only? 
