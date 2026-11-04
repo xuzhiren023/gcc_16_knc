@@ -238,11 +238,7 @@
    (match_operand:SI 3 "const_int_operand")]
   "TARGET_KNC"
 {
-  rtx result = emit_library_call_value (
-    init_one_libfunc ("__atomic_exchange_16"), NULL_RTX, LCT_NORMAL,
-    TImode, XEXP (operands[1], 0), Pmode, operands[2], TImode,
-    GEN_INT (INTVAL (operands[3]) & MEMMODEL_BASE_MASK), SImode);
-  emit_move_insn (operands[0], result);
+  ix86_knc_expand_atomic_exchange (operands);
   DONE;
 })
 
@@ -252,10 +248,7 @@
    (match_operand:SI 2 "const_int_operand")]
   "TARGET_KNC"
 {
-  emit_library_call (
-    init_one_libfunc ("__atomic_store_16"), LCT_NORMAL, VOIDmode,
-    XEXP (operands[0], 0), Pmode, operands[1], TImode,
-    GEN_INT (INTVAL (operands[2]) & MEMMODEL_BASE_MASK), SImode);
+  ix86_knc_expand_atomic_store (operands);
   DONE;
 })
 
