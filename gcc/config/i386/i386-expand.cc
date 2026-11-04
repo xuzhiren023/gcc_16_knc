@@ -1346,6 +1346,8 @@ ix86_fixup_binary_operands_no_copy (enum rtx_code code,
 				    machine_mode mode, rtx operands[],
 				    bool use_ndd)
 {
+  if (TARGET_KNC && ix86_knc_packed_mode_p (mode))
+    return ix86_knc_fixup_binary_operands (mode, operands);
   rtx dst = ix86_fixup_binary_operands (code, mode, operands, use_ndd);
   gcc_assert (dst == operands[0]);
 }
@@ -18657,6 +18659,8 @@ quarter:
 void
 ix86_expand_vector_init (bool mmx_ok, rtx target, rtx vals)
 {
+  if (TARGET_KNC)
+    return ix86_knc_expand_vector_init (target, vals);
   machine_mode mode = GET_MODE (target);
   machine_mode inner_mode = GET_MODE_INNER (mode);
   int n_elts = GET_MODE_NUNITS (mode);

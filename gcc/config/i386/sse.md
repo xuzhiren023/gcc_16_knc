@@ -412,9 +412,9 @@
   [(V32HF "TARGET_AVX512FP16")
    (V16HF "TARGET_AVX512FP16 && TARGET_AVX512VL")
    (V8HF "TARGET_AVX512FP16 && TARGET_AVX512VL")
-   (V16SF "TARGET_AVX512F")
+   (V16SF "TARGET_AVX512F || TARGET_KNC")
    (V8SF "TARGET_AVX") V4SF
-   (V8DF "TARGET_AVX512F")
+   (V8DF "TARGET_AVX512F || TARGET_KNC")
    (V4DF "TARGET_AVX") (V2DF "TARGET_SSE2")
    (V32BF "TARGET_AVX10_2")
    (V16BF "TARGET_AVX10_2")
@@ -2690,7 +2690,8 @@
 	(plusminus:VF_BHSD
 	  (match_operand:VF_BHSD 1 "<round_nimm_predicate>")
 	  (match_operand:VF_BHSD 2 "<round_nimm_predicate>")))]
-  "TARGET_SSE && <mask_mode512bit_condition> && <round_mode512bit_condition>"
+  "(TARGET_SSE || TARGET_KNC)
+   && <mask_mode512bit_condition> && <round_mode512bit_condition>"
   "ix86_fixup_binary_operands_no_copy (<CODE>, <MODE>mode, operands);")
 
 (define_insn "*<insn><mode>3<mask_name><round_name>"
@@ -2779,7 +2780,8 @@
 	(mult:VF_BHSD
 	  (match_operand:VF_BHSD 1 "<round_nimm_predicate>")
 	  (match_operand:VF_BHSD 2 "<round_nimm_predicate>")))]
-  "TARGET_SSE && <mask_mode512bit_condition> && <round_mode512bit_condition>"
+  "(TARGET_SSE || TARGET_KNC)
+   && <mask_mode512bit_condition> && <round_mode512bit_condition>"
   "ix86_fixup_binary_operands_no_copy (MULT, <MODE>mode, operands);")
 
 (define_insn "*mul<mode>3<mask_name><round_name>"
@@ -6213,7 +6215,7 @@
    (V2DF "TARGET_FMA || TARGET_FMA4 || TARGET_AVX512VL")
    (V8SF "TARGET_FMA || TARGET_FMA4 || TARGET_AVX512VL")
    (V4DF "TARGET_FMA || TARGET_FMA4 || TARGET_AVX512VL")
-   (V16SF "TARGET_AVX512F") (V8DF "TARGET_AVX512F")
+   (V16SF "TARGET_AVX512F || TARGET_KNC") (V8DF "TARGET_AVX512F || TARGET_KNC")
    (HF "TARGET_AVX512FP16") (V8HF "TARGET_AVX512FP16 && TARGET_AVX512VL")
    (V16HF "TARGET_AVX512FP16 && TARGET_AVX512VL") (V32HF "TARGET_AVX512FP16")
    (V8BF "TARGET_AVX10_2") (V16BF "TARGET_AVX10_2") (V32BF "TARGET_AVX10_2")])
@@ -29757,8 +29759,8 @@
    (V8DI "TARGET_AVX512F") (V4DI "TARGET_AVX") V2DI
    (V32HF "TARGET_AVX512F") (V16HF "TARGET_AVX") V8HF
    (V32BF "TARGET_AVX512F") (V16BF "TARGET_AVX") V8BF
-   (V16SF "TARGET_AVX512F") (V8SF "TARGET_AVX") V4SF
-   (V8DF "TARGET_AVX512F") (V4DF "TARGET_AVX") (V2DF "TARGET_SSE2")
+   (V16SF "TARGET_AVX512F || TARGET_KNC") (V8SF "TARGET_AVX") V4SF
+   (V8DF "TARGET_AVX512F || TARGET_KNC") (V4DF "TARGET_AVX") (V2DF "TARGET_SSE2")
    (V4TI "TARGET_AVX512F") (V2TI "TARGET_AVX")])
 
 ;; Likewise, but for initialization from half sized vectors.
@@ -29777,7 +29779,7 @@
 (define_expand "vec_init<mode><ssescalarmodelower>"
   [(match_operand:VEC_INIT_MODE 0 "register_operand")
    (match_operand 1)]
-  "TARGET_SSE"
+  "TARGET_SSE || TARGET_KNC"
 {
   ix86_expand_vector_init (false, operands[0], operands[1]);
   DONE;
