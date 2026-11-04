@@ -4960,7 +4960,7 @@ ix86_gimplify_va_arg (tree valist, tree type, gimple_seq *pre_p,
 		      gimple_seq *post_p)
 {
   if (TARGET_KNC && !ix86_knc_check_abi_type (type, TYPE_MODE (type)))
-    return error_mark_node;
+    return ix86_knc_va_arg_error (type);
   static const int intreg[6] = { 0, 1, 2, 3, 4, 5 };
   tree f_gpr, f_fpr, f_ovf, f_sav;
   tree gpr, fpr, ovf, sav, t;
