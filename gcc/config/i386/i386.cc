@@ -26004,6 +26004,8 @@ ix86_reassociation_width (unsigned int op, machine_mode mode)
 static machine_mode
 ix86_preferred_simd_mode (scalar_mode mode)
 {
+  if (TARGET_KNC)
+    return ix86_knc_preferred_simd_mode (mode);
   if (!TARGET_SSE)
     return word_mode;
 

@@ -18659,7 +18659,7 @@ quarter:
 void
 ix86_expand_vector_init (bool mmx_ok, rtx target, rtx vals)
 {
-  if (TARGET_KNC)
+  if (ix86_knc_packed_mode_p (GET_MODE (target)))
     return ix86_knc_expand_vector_init (target, vals);
   machine_mode mode = GET_MODE (target);
   machine_mode inner_mode = GET_MODE_INNER (mode);
@@ -26840,6 +26840,7 @@ ix86_expand_pinsr (rtx *operands)
 machine_mode
 ix86_split_reduction (machine_mode mode)
 {
+  if (TARGET_KNC) return mode;
   /* Reduce lowpart against highpart until we reach SSE reg width to
      avoid cross-lane operations.  */
   switch (mode)
