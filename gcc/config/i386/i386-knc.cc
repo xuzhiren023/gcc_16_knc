@@ -57,7 +57,8 @@ ix86_knc_packed_mode_p (machine_mode mode)
 bool
 ix86_knc_vector_move_mode_p (machine_mode mode)
 {
-  return ix86_knc_packed_mode_p (mode) || (TARGET_KNC && mode == V4SFmode);
+  return ix86_knc_packed_mode_p (mode)
+	 || (TARGET_KNC && TARGET_64BIT && mode == V4SFmode);
 }
 
 /* ADR-0005 point 5: try one full ZMM vector size.  Unsupported scalar
@@ -149,7 +150,8 @@ ix86_knc_expand_vector_move (machine_mode mode, rtx *operands)
       /* Keep the donor's 16-byte save slots and TI transport (ADR-0004).
          Expansion stays after the shared loop's AL test, so the scratch
          definitions and the resulting save sequence are unchanged.  */
-      gcc_assert (MEM_P (operands[0]) && SSE_REG_P (operands[1]));
+      gcc_assert (MEM_P (operands[0]) && SSE_REG_P (operands[1])
+		  && MEM_ALIGN (operands[0]) >= 128);
       emit_insn (gen_knc_save_varargs
 		 (adjust_address (operands[0], TImode, 0),
 		  gen_rtx_REG (TImode, REGNO (operands[1]))));
