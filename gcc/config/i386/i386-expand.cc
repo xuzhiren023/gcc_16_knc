@@ -1400,6 +1400,7 @@ ix86_expand_vector_logical_operator (enum rtx_code code, machine_mode mode,
      to express vector logical operation on float vectors than
      to cast them temporarily to integer vectors.  */
   if (op1
+      && !TARGET_KNC
       && !TARGET_SSE_PACKED_SINGLE_INSN_OPTIMAL
       && (SUBREG_P (op2) || CONST_VECTOR_P (op2))
       && GET_MODE_CLASS (GET_MODE (SUBREG_REG (op1))) == MODE_VECTOR_FLOAT

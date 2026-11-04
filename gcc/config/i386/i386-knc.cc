@@ -213,14 +213,19 @@ ix86_knc_fixup_binary_operands (machine_mode mode, rtx *operands)
 /* ADR-0005 point 3 / Intel 327364-001 section 2.2.1: replicate the low
    128-bit block, then swizzle within 128-bit SF / 256-bit DF groups.
    Each instruction has its own allocated result.  A scalar arriving in
-   x87 reaches the YJ source through S2's visible reload bridge.  */
+   x87 reaches the YJ source through S2's visible reload bridge.
+   An integer scalar lives in a GPR, so it is broadcast from a stack slot
+   with vpbroadcastd/q.  A memory scalar that is not element-aligned is
+   copied to an aligned slot first: IMCI memory operands must be aligned.  */
 void
 ix86_knc_expand_duplicate (rtx target, rtx value)
 {
   machine_mode mode = GET_MODE (target);
-  gcc_assert (mode == V16SFmode || mode == V8DFmode);
+  gcc_assert (ix86_knc_packed_mode_p (mode));
   machine_mode inner = GET_MODE_INNER (mode);
-  if (CONSTANT_P (value))
+  if (CONSTANT_P (value)
+      || (MEM_P (value) && !ix86_knc_element_aligned_mem_p (value, mode))
+      || (!MEM_P (value) && INTEGRAL_MODE_P (mode)))
     {
       rtx mem = assign_stack_temp (inner, GET_MODE_SIZE (inner));
       emit_move_insn (mem, value);
