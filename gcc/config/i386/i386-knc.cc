@@ -266,6 +266,27 @@ ix86_knc_expand_vector_init (rtx target, rtx vals)
   emit_move_insn (target, mem);
 }
 
+/* Legacy __sync model tags contain internal bits outside the libatomic ABI.
+   Keep these calls visible in RTL, as in the original imci.md expanders.  */
+void
+ix86_knc_expand_atomic_exchange (rtx *operands)
+{
+  rtx result = emit_library_call_value (
+    init_one_libfunc ("__atomic_exchange_16"), NULL_RTX, LCT_NORMAL,
+    TImode, XEXP (operands[1], 0), Pmode, operands[2], TImode,
+    GEN_INT (INTVAL (operands[3]) & MEMMODEL_BASE_MASK), SImode);
+  emit_move_insn (operands[0], result);
+}
+
+void
+ix86_knc_expand_atomic_store (rtx *operands)
+{
+  emit_library_call (
+    init_one_libfunc ("__atomic_store_16"), LCT_NORMAL, VOIDmode,
+    XEXP (operands[0], 0), Pmode, operands[1], TImode,
+    GEN_INT (INTVAL (operands[2]) & MEMMODEL_BASE_MASK), SImode);
+}
+
 /* KNC has no CMPXCHG16B (Intel 327364-001, Appendix B).  Keep the
    libatomic call and its expected-value temporary visible in RTL.
    Do not add atomic_loadti: TI loads are not lock-free, and __atomic

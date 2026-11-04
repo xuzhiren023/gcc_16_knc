@@ -35,6 +35,8 @@ extern void ix86_knc_expand_vector_init (rtx, rtx);
 extern void ix86_knc_expand_duplicate (rtx, rtx);
 
 extern void ix86_expand_knc_cas (rtx *);
+extern void ix86_knc_expand_atomic_exchange (rtx *);
+extern void ix86_knc_expand_atomic_store (rtx *);
 extern bool ix86_knc_expand_move (rtx, rtx);
 extern HARD_REG_SET ix86_knc_zero_call_used_regs (HARD_REG_SET);
 extern enum processor_type ix86_knc_target_macros
