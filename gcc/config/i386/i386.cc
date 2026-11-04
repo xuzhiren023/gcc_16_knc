@@ -22807,7 +22807,8 @@ ix86_rtx_costs (rtx x, machine_mode mode, int outer_code_i, int opno,
 	rtx sub;
 
         gcc_assert (FLOAT_MODE_P (mode));
-        gcc_assert (TARGET_FMA || TARGET_FMA4 || TARGET_AVX512F);
+        gcc_assert (TARGET_FMA || TARGET_FMA4 || TARGET_AVX512F
+		    || TARGET_KNC);
 
         *total = ix86_vec_cost (mode,
 				GET_MODE_INNER (mode) == SFmode
