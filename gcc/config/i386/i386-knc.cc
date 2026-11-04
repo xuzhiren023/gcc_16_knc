@@ -275,6 +275,16 @@ ix86_expand_knc_cas (rtx *operands)
 bool
 ix86_knc_expand_move (rtx op0, rtx op1)
 {
+  if (GET_MODE (op0) == XImode)
+    {
+      /* Like ix86_expand_move, expose the intermediate register for a
+         memory copy.  knc_movxi has no memory-to-memory alternative.  */
+      if (MEM_P (op0) && MEM_P (op1))
+        op1 = force_reg (XImode, op1);
+      emit_insn (gen_knc_movxi (op0, op1));
+      return true;
+    }
+
   if (SSE_REG_P (op0) || SSE_REG_P (op1))
     {
       switch (GET_MODE (op0))
