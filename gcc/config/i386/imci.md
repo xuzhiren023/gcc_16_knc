@@ -525,14 +525,16 @@
 
 ;; k1om has no vpcmpq, so V8DI compares stay off (point 6).
 (define_mode_iterator KNC_CMP [V16SF V8DF V16SI])
+;; sse.md's avx512fmaskmode, which is defined after this file is read.
+(define_mode_attr knc_maskmode [(V16SF "HI") (V16SI "HI") (V8DF "QI") (V8DI "QI")])
 (define_mode_attr knc_cmp [(V16SF "vcmpps") (V8DF "vcmppd") (V16SI "vpcmpd")])
 
 ;; Intel 327364-001 VCMPPS/VCMPPD and VPCMPD/VPCMPUD.  Operand 3 is KNC's
 ;; 3-bit predicate (ix86_knc_expand_mask_vec_cmp), not AVX-512's 5-bit one.
 ;; The 8-lane forms write zero to bits 15:8 of the mask.
 (define_insn "*knc_cmp<mode>"
-  [(set (match_operand:<avx512fmaskmode> 0 "register_operand" "=YK")
-	(unspec:<avx512fmaskmode>
+  [(set (match_operand:<knc_maskmode> 0 "register_operand" "=YK")
+	(unspec:<knc_maskmode>
 	  [(match_operand:KNC_CMP 1 "register_operand" "YJ")
 	   (match_operand:KNC_CMP 2 "nonimmediate_operand" "YJBm")
 	   (match_operand:SI 3 "const_0_to_7_operand")]
@@ -569,7 +571,7 @@
 	(vec_merge:KNC_PACKED
 	  (match_operand:KNC_PACKED 1 "nonimmediate_operand" "YJBm")
 	  (match_operand:KNC_PACKED 2 "register_operand" "YJ")
-	  (match_operand:<avx512fmaskmode> 3 "register_operand" "YL")))]
+	  (match_operand:<knc_maskmode> 3 "register_operand" "YL")))]
   "TARGET_KNC"
   "<knc_blend>\t{%g1, %g2, %g0%{%3%}|%g0%{%3%}, %g2, %g1}"
   [(set_attr "type" "ssemov")
