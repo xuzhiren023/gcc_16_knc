@@ -26840,6 +26840,7 @@ ix86_expand_pinsr (rtx *operands)
 machine_mode
 ix86_split_reduction (machine_mode mode)
 {
+  if (TARGET_KNC) return mode;
   /* Reduce lowpart against highpart until we reach SSE reg width to
      avoid cross-lane operations.  */
   switch (mode)
