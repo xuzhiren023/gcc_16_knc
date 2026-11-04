@@ -85,6 +85,14 @@ ix86_knc_support_vector_misalignment (machine_mode mode, int misalignment,
          || (misalignment >= 0 && misalignment % bytes == 0);
 }
 
+/* Also guard recognition after combine and reload.  Keep MEM_ALIGN in
+   target code, since gencondmd does not expose that RTL accessor.  */
+bool
+ix86_knc_element_aligned_mem_p (rtx mem, machine_mode mode)
+{
+  return MEM_ALIGN (mem) >= GET_MODE_BITSIZE (GET_MODE_INNER (mode));
+}
+
 /* Only a packed all-bits-zero constant has an immediate IMCI form.  */
 bool
 ix86_knc_zero_constant_p (rtx x, machine_mode mode)
