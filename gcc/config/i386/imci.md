@@ -262,10 +262,13 @@
   [(V16SF "vmovaps") (V8DF "vmovapd")
    (V16SI "vmovdqa32") (V8DI "vmovdqa64")])
 
+;; Bm, not m: the insn condition is not rechecked when LRA substitutes a
+;; memory equivalence, so the constraint itself must refuse an address that
+;; is not known 64-byte aligned (S4-09).  LRA then reloads through YJ.
 (define_insn "*knc_packed_move<mode>"
-  [(set (match_operand:KNC_PACKED 0 "nonimmediate_operand" "=YJ,YJ,m,YJ")
+  [(set (match_operand:KNC_PACKED 0 "nonimmediate_operand" "=YJ,YJ,Bm,YJ")
         (match_operand:KNC_PACKED 1 "nonimmediate_or_sse_const_operand"
-                                  "YJ,m,YJ,C"))]
+                                  "YJ,Bm,YJ,C"))]
   "TARGET_KNC && (register_operand (operands[0], <MODE>mode)
                   || register_operand (operands[1], <MODE>mode))
    && !misaligned_operand (operands[0], <MODE>mode)
@@ -320,7 +323,9 @@
    (set_attr "mode" "XI")])
 
 ;; Intel 327364-001, VADD/VSUB/VMUL: only an aligned full-width memory
-;; operand may be folded.  vector_operand enforces that without AVX flags.
+;; operand may be folded.  vector_operand enforces that without AVX flags
+;; at recog; Bm (vector_memory_operand) enforces it when LRA substitutes a
+;; memory equivalence, which plain m would accept misaligned (S4-09).
 (define_code_iterator KNC_FP_BINARY [plus minus mult])
 (define_code_attr knc_fp_binary [(plus "add") (minus "sub") (mult "mul")])
 (define_code_attr knc_fp_type [(plus "sseadd") (minus "sseadd") (mult "ssemul")])
@@ -328,7 +333,7 @@
   [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
         (KNC_FP_BINARY:KNC_FP
           (match_operand:KNC_FP 1 "register_operand" "YJ")
-          (match_operand:KNC_FP 2 "vector_operand" "YJm")))]
+          (match_operand:KNC_FP 2 "vector_operand" "YJBm")))]
   "TARGET_KNC"
   "v<knc_fp_binary><knc_fp_suffix>\t%g2, %g1, %g0"
   [(set_attr "type" "<knc_fp_type>")
