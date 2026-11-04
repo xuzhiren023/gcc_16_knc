@@ -24,6 +24,28 @@
    (V16SF "TARGET_AVX512F || TARGET_KNC") (V8SF "TARGET_AVX") V4SF
    (V8DF "TARGET_AVX512F || TARGET_KNC")  (V4DF "TARGET_AVX") V2DF])
 
+;; Expander-only copies of VI_AVX2, VI4_AVX512F and VI for the shared
+;; integer add/sub, mul and logic expanders (ADR-0006 point 4, ADR-0007
+;; point 2).  The sse.md insns keep the original iterators.  Each expander
+;; condition also tests ix86_knc_packed_mode_p, so the KNC modes enabled
+;; here are exactly those with a "|| TARGET_KNC" entry.  V8DI add and sub
+;; stay off: k1om has no vpaddq or vpsubq (S4-04 adds the carry sequence).
+(define_mode_iterator VI_AVX2_KNC
+  [(V64QI "TARGET_AVX512BW") (V32QI "TARGET_AVX2") V16QI
+   (V32HI "TARGET_AVX512BW") (V16HI "TARGET_AVX2") V8HI
+   (V16SI "TARGET_AVX512F || TARGET_KNC") (V8SI "TARGET_AVX2") V4SI
+   (V8DI "TARGET_AVX512F") (V4DI "TARGET_AVX2") V2DI])
+
+(define_mode_iterator VI4_AVX512F_KNC
+  [(V16SI "TARGET_AVX512F || TARGET_KNC") (V8SI "TARGET_AVX2") V4SI])
+
+(define_mode_iterator VI_KNC
+  [(V16SI "TARGET_AVX512F || TARGET_KNC") (V8DI "TARGET_AVX512F || TARGET_KNC")
+   (V64QI "TARGET_AVX512BW") (V32QI "TARGET_AVX") V16QI
+   (V32HI "TARGET_AVX512BW") (V16HI "TARGET_AVX") V8HI
+   (V8SI "TARGET_AVX") V4SI
+   (V4DI "TARGET_AVX") V2DI])
+
 (define_mode_iterator KNC_SCALAR [SF DF SI DI TI TF])
 (define_mode_iterator KNC_BROADCAST [SF DF SI DI])
 (define_mode_iterator KNC_PAIR [TI TF])
@@ -339,6 +361,36 @@
   [(set_attr "type" "<knc_fp_type>")
    (set_attr "mode" "<MODE>")])
 
+;; Intel 327364-001 VPADDD, VPSUBD, VPMULLD and VPAND/VPOR/VPXOR{D,Q}.
+;; k1om has no vpaddq, vpsubq or vpmullq, so V8DI is logic only (ADR-0005
+;; point 3).  The memory source is aligned and full-width, as above (S4-09).
+(define_code_iterator KNC_INT_BINARY [plus minus mult])
+(define_code_attr knc_int_binary [(plus "add") (minus "sub") (mult "mull")])
+(define_code_attr knc_int_type
+  [(plus "sseiadd") (minus "sseiadd") (mult "sseimul")])
+(define_code_attr knc_int_comm [(plus "%") (minus "") (mult "%")])
+(define_insn "*knc_<code>v16si3"
+  [(set (match_operand:V16SI 0 "register_operand" "=YJ")
+        (KNC_INT_BINARY:V16SI
+          (match_operand:V16SI 1 "register_operand" "<knc_int_comm>YJ")
+          (match_operand:V16SI 2 "vector_operand" "YJBm")))]
+  "TARGET_KNC"
+  "vp<knc_int_binary>d\t%g2, %g1, %g0"
+  [(set_attr "type" "<knc_int_type>")
+   (set_attr "mode" "XI")])
+
+(define_mode_iterator KNC_INT [V16SI V8DI])
+(define_mode_attr knc_int_suffix [(V16SI "d") (V8DI "q")])
+(define_insn "*knc_<code><mode>3"
+  [(set (match_operand:KNC_INT 0 "register_operand" "=YJ")
+        (any_logic:KNC_INT
+          (match_operand:KNC_INT 1 "register_operand" "%YJ")
+          (match_operand:KNC_INT 2 "vector_operand" "YJBm")))]
+  "TARGET_KNC"
+  "vp<logic><knc_int_suffix>\t%g2, %g1, %g0"
+  [(set_attr "type" "sselog")
+   (set_attr "mode" "XI")])
+
 ;; All four FMAMODEM expanders become available together.  These register
 ;; forms implement each sign combination without any separate negation.
 ;; The tied addend models the destructive 231 encoding for the allocator.
@@ -387,12 +439,23 @@
   DONE;
 })
 
+;; Integer broadcasts reach this through vec_init (ix86_knc_expand_duplicate);
+;; sse.md's vec_duplicate for V16SI and V8DI stays off.  The scalar source
+;; must be element-aligned, like every IMCI memory operand.
+(define_mode_attr knc_packed_scalar
+  [(V16SF "SF") (V8DF "DF") (V16SI "SI") (V8DI "DI")])
+(define_mode_attr knc_packed_broadcast
+  [(V16SF "vbroadcastss") (V8DF "vbroadcastsd")
+   (V16SI "vpbroadcastd") (V8DI "vpbroadcastq")])
+(define_mode_attr knc_packed_insn_mode
+  [(V16SF "V16SF") (V8DF "V8DF") (V16SI "XI") (V8DI "XI")])
 (define_insn "*knc_broadcast_memory<mode>"
-  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
-        (vec_duplicate:KNC_FP (match_operand:<knc_fp_scalar> 1 "memory_operand" "m")))]
-  "TARGET_KNC"
-  "vbroadcast<knc_fp_broadcast>\t%1, %g0"
-  [(set_attr "type" "ssemov") (set_attr "mode" "<MODE>")])
+  [(set (match_operand:KNC_PACKED 0 "register_operand" "=YJ")
+        (vec_duplicate:KNC_PACKED
+          (match_operand:<knc_packed_scalar> 1 "memory_operand" "m")))]
+  "TARGET_KNC && ix86_knc_element_aligned_mem_p (operands[1], <MODE>mode)"
+  "<knc_packed_broadcast>\t%1, %g0"
+  [(set_attr "type" "ssemov") (set_attr "mode" "<knc_packed_insn_mode>")])
 
 ;; The block result has four copies of the scalar's low 128-bit block.
 ;; Upper scalar lanes are unspecified; the following swizzle selects only

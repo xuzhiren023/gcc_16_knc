@@ -16595,11 +16595,11 @@
   "operands[2] = force_reg (<MODE>mode, CONST0_RTX (<MODE>mode));")
 
 (define_expand "<insn><mode>3"
-  [(set (match_operand:VI_AVX2 0 "register_operand")
-	(plusminus:VI_AVX2
-	  (match_operand:VI_AVX2 1 "vector_operand")
-	  (match_operand:VI_AVX2 2 "vector_operand")))]
-  "TARGET_SSE2"
+  [(set (match_operand:VI_AVX2_KNC 0 "register_operand")
+	(plusminus:VI_AVX2_KNC
+	  (match_operand:VI_AVX2_KNC 1 "vector_operand")
+	  (match_operand:VI_AVX2_KNC 2 "vector_operand")))]
+  "TARGET_SSE2 || ix86_knc_packed_mode_p (<MODE>mode)"
   "ix86_fixup_binary_operands_no_copy (<CODE>, <MODE>mode, operands);")
 
 (define_expand "cond_<insn><mode>"
@@ -17255,13 +17255,13 @@
 })
 
 (define_expand "mul<mode>3<mask_name>"
-  [(set (match_operand:VI4_AVX512F 0 "register_operand")
-	(mult:VI4_AVX512F
-	  (match_operand:VI4_AVX512F 1 "general_vector_operand")
-	  (match_operand:VI4_AVX512F 2 "general_vector_operand")))]
-  "TARGET_SSE2 && <mask_mode512bit_condition>"
+  [(set (match_operand:VI4_AVX512F_KNC 0 "register_operand")
+	(mult:VI4_AVX512F_KNC
+	  (match_operand:VI4_AVX512F_KNC 1 "general_vector_operand")
+	  (match_operand:VI4_AVX512F_KNC 2 "general_vector_operand")))]
+  "(TARGET_SSE2 || ix86_knc_packed_mode_p (<MODE>mode)) && <mask_mode512bit_condition>"
 {
-  if (TARGET_SSE4_1)
+  if (TARGET_SSE4_1 || TARGET_KNC)
     {
       if (!vector_operand (operands[1], <MODE>mode))
 	operands[1] = force_reg (<MODE>mode, operands[1]);
@@ -19092,11 +19092,11 @@
    (set_attr "mode" "<sseinsnmode>")])
 
 (define_expand "<code><mode>3"
-  [(set (match_operand:VI 0 "register_operand")
-	(any_logic:VI
-	  (match_operand:VI 1 "nonimmediate_or_const_vector_operand")
-	  (match_operand:VI 2 "nonimmediate_or_const_vector_operand")))]
-  "TARGET_SSE"
+  [(set (match_operand:VI_KNC 0 "register_operand")
+	(any_logic:VI_KNC
+	  (match_operand:VI_KNC 1 "nonimmediate_or_const_vector_operand")
+	  (match_operand:VI_KNC 2 "nonimmediate_or_const_vector_operand")))]
+  "TARGET_SSE || ix86_knc_packed_mode_p (<MODE>mode)"
 {
   ix86_expand_vector_logical_operator (<CODE>, <MODE>mode, operands);
   DONE;
@@ -29744,8 +29744,8 @@
 (define_mode_iterator VEC_INIT_MODE
   [(V64QI "TARGET_AVX512F") (V32QI "TARGET_AVX") V16QI
    (V32HI "TARGET_AVX512F") (V16HI "TARGET_AVX") V8HI
-   (V16SI "TARGET_AVX512F") (V8SI "TARGET_AVX") V4SI
-   (V8DI "TARGET_AVX512F") (V4DI "TARGET_AVX") V2DI
+   (V16SI "TARGET_AVX512F || TARGET_KNC") (V8SI "TARGET_AVX") V4SI
+   (V8DI "TARGET_AVX512F || TARGET_KNC") (V4DI "TARGET_AVX") V2DI
    (V32HF "TARGET_AVX512F") (V16HF "TARGET_AVX") V8HF
    (V32BF "TARGET_AVX512F") (V16BF "TARGET_AVX") V8BF
    (V16SF "TARGET_AVX512F || TARGET_KNC") (V8SF "TARGET_AVX") V4SF
