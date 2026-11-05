@@ -41,6 +41,10 @@ along with GCC; see the file COPYING3.  If not see
 #include "optabs.h"
 #include "cpplib.h"
 #include "targhooks.h"
+#include "fold-const.h"
+#include "gimple.h"
+#include "cfgloop.h"
+#include "tree-vectorizer.h"
 
 /* Exactly the packed storage modes in ADR-0005 point 1.  This predicate
    does not advertise arithmetic, an ABI, or automatic vectorization.  */
@@ -93,6 +97,38 @@ ix86_knc_support_vector_misalignment (machine_mode mode, int misalignment,
   unsigned int bytes = GET_MODE_SIZE (GET_MODE_INNER (mode));
   return misalignment == -1
          || (misalignment >= 0 && misalignment % bytes == 0);
+}
+
+/* S4-05, ADR-0007 point 7: ask for a masked epilogue only when each of
+   its masked moves will be one aligned line.  Every relevant access must
+   be contiguous, forward, and known 64-byte aligned without a peel: after
+   an alignment peel the epilogue's references have unknown misalignment
+   (PR 92351), and a misaligned masked access has no IMCI form yet.  */
+bool
+ix86_knc_masked_epilogue_p (loop_vec_info loop_vinfo)
+{
+  if (!ix86_knc_packed_mode_p (loop_vinfo->vector_mode)
+      || LOOP_VINFO_PEELING_FOR_ALIGNMENT (loop_vinfo) != 0
+      || LOOP_REQUIRES_VERSIONING_FOR_ALIGNMENT (loop_vinfo))
+    return false;
+  for (data_reference *dr : LOOP_VINFO_DATAREFS (loop_vinfo))
+    {
+      dr_vec_info *dr_info = loop_vinfo->lookup_dr (dr);
+      stmt_vec_info stmt_info = dr_info->stmt;
+      if (!STMT_VINFO_RELEVANT_P (stmt_info) || integer_zerop (DR_STEP (dr)))
+	continue;
+      tree vectype = STMT_VINFO_VECTYPE (stmt_info);
+      if (STMT_VINFO_GATHER_SCATTER_P (stmt_info)
+	  || STMT_VINFO_STRIDED_P (stmt_info)
+	  || STMT_VINFO_GROUPED_ACCESS (stmt_info)
+	  || TREE_CODE (DR_STEP (dr)) != INTEGER_CST
+	  || tree_int_cst_sgn (DR_STEP (dr)) < 0
+	  || !vectype
+	  || dr_misalignment (dr_info, vectype) != 0
+	  || !known_eq (DR_TARGET_ALIGNMENT (dr_info), 64U))
+	return false;
+    }
+  return true;
 }
 
 /* Also guard recognition after combine and reload.  Keep MEM_ALIGN in

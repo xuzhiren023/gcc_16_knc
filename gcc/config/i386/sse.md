@@ -2747,12 +2747,12 @@
    (set_attr "mode" "<ssescalarmode>")])
 
 (define_expand "cond_mul<mode>"
-  [(set (match_operand:VFH 0 "register_operand")
-	(vec_merge:VFH
-	  (mult:VFH
-	    (match_operand:VFH 2 "vector_operand")
-	    (match_operand:VFH 3 "vector_operand"))
-	  (match_operand:VFH 4 "nonimm_or_0_operand")
+  [(set (match_operand:VFH_KNC 0 "register_operand")
+	(vec_merge:VFH_KNC
+	  (mult:VFH_KNC
+	    (match_operand:VFH_KNC 2 "vector_operand")
+	    (match_operand:VFH_KNC 3 "vector_operand"))
+	  (match_operand:VFH_KNC 4 "nonimm_or_0_operand")
 	  (match_operand:<avx512fmaskmode> 1 "register_operand")))]
   "<MODE_SIZE> == 64 || TARGET_AVX512VL"
 {
@@ -6352,8 +6352,15 @@
 	    (match_operand:VFH_AVX512VL 4 "vector_operand"))
 	  (match_operand:VFH_AVX512VL 5 "nonimm_or_0_operand")
 	  (match_operand:<avx512fmaskmode> 1 "register_operand")))]
-  "TARGET_AVX512F"
+  "TARGET_AVX512F || ix86_knc_packed_mode_p (<MODE>mode)"
 {
+  if (TARGET_KNC)
+    {
+      emit_insn (gen_knc_cond_fma (<MODE>mode, operands[0], operands[1],
+				   operands[2], operands[3], operands[4],
+				   operands[5]));
+      DONE;
+    }
   rtx tmp = gen_reg_rtx (<MODE>mode);
   emit_insn (gen_fma<mode>4 (tmp,
 			     operands[2],

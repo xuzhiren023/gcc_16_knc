@@ -20,6 +20,7 @@ along with GCC; see the file COPYING3.  If not see
 #define GCC_I386_KNC_H
 
 struct HARD_REG_SET;
+class _loop_vec_info;
 
 extern bool ix86_knc_packed_mode_p (machine_mode);
 extern bool ix86_knc_vector_move_mode_p (machine_mode);
@@ -34,6 +35,7 @@ extern void ix86_knc_fixup_binary_operands (machine_mode, rtx *);
 extern void ix86_knc_expand_vector_init (rtx, rtx);
 extern void ix86_knc_expand_duplicate (rtx, rtx);
 extern bool ix86_knc_expand_mask_vec_cmp (rtx, enum rtx_code, rtx, rtx);
+extern bool ix86_knc_masked_epilogue_p (class _loop_vec_info *);
 
 extern void ix86_expand_knc_cas (rtx *);
 extern void ix86_knc_expand_atomic_exchange (rtx *);
