@@ -2868,11 +2868,16 @@
 })
 
 (define_expand "div<mode>3"
-  [(set (match_operand:VF1 0 "register_operand")
-	(div:VF1 (match_operand:VF1 1 "register_operand")
-		 (match_operand:VF1 2 "vector_operand")))]
-  "TARGET_SSE"
+  [(set (match_operand:VF1_KNC 0 "register_operand")
+	(div:VF1_KNC (match_operand:VF1_KNC 1 "register_operand")
+		 (match_operand:VF1_KNC 2 "vector_operand")))]
+  "TARGET_SSE || TARGET_KNC"
 {
+  if (TARGET_KNC)
+    {
+      ix86_knc_expand_div (operands, false);
+      DONE;
+    }
   if (TARGET_SSE_MATH
       && TARGET_RECIP_VEC_DIV
       && !optimize_insn_for_size_p ()
@@ -2905,15 +2910,20 @@
 })
 
 (define_expand "cond_div<mode>"
-  [(set (match_operand:VFH 0 "register_operand")
-	(vec_merge:VFH
-	  (div:VFH
-	    (match_operand:VFH 2 "register_operand")
-	    (match_operand:VFH 3 "vector_operand"))
-	  (match_operand:VFH 4 "nonimm_or_0_operand")
+  [(set (match_operand:VFH_KNC_DIV 0 "register_operand")
+	(vec_merge:VFH_KNC_DIV
+	  (div:VFH_KNC_DIV
+	    (match_operand:VFH_KNC_DIV 2 "register_operand")
+	    (match_operand:VFH_KNC_DIV 3 "vector_operand"))
+	  (match_operand:VFH_KNC_DIV 4 "nonimm_or_0_operand")
 	  (match_operand:<avx512fmaskmode> 1 "register_operand")))]
   "<MODE_SIZE> == 64 || TARGET_AVX512VL"
 {
+  if (TARGET_KNC)
+    {
+      ix86_knc_expand_div (operands, true);
+      DONE;
+    }
   emit_insn (gen_<sse>_div<mode>3_mask (operands[0],
 					operands[2],
 					operands[3],
