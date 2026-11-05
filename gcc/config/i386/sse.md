@@ -9034,10 +9034,11 @@
    (set_attr "mode" "<ssescalarmode>")])
 
 (define_insn "float<sseintvecmodelower><mode>2<mask_name><round_name>"
-  [(set (match_operand:VF1 0 "register_operand" "=x,v")
-	(float:VF1
+  [(set (match_operand:VF1_KNC 0 "register_operand" "=x,v")
+	(float:VF1_KNC
 	  (match_operand:<sseintvecmode> 1 "<round_nimm_predicate>" "xBm,<round_constraint>")))]
-  "TARGET_SSE2 && <mask_mode512bit_condition> && <round_mode512bit_condition>"
+  "(TARGET_SSE2 || (TARGET_KNC && <MODE>mode == V16SFmode))
+   && <mask_mode512bit_condition> && <round_mode512bit_condition>"
   "@
    cvtdq2ps\t{%1, %0|%0, %1}
    vcvtdq2ps\t{<round_mask_op2>%1, %0<mask_operand2>|%0<mask_operand2>, %1<round_mask_op2>}"
@@ -9057,10 +9058,11 @@
    (set_attr "mode" "<MODE>")])
 
 (define_expand "floatuns<sseintvecmodelower><mode>2"
-  [(set (match_operand:VF1 0 "register_operand")
-	(unsigned_float:VF1
+  [(set (match_operand:VF1_KNC 0 "register_operand")
+	(unsigned_float:VF1_KNC
 	  (match_operand:<sseintvecmode> 1 "register_operand")))]
-  "TARGET_SSE2 && (<MODE>mode == V4SFmode || TARGET_AVX2)"
+  "(TARGET_SSE2 && (<MODE>mode == V4SFmode || TARGET_AVX2))
+   || (TARGET_KNC && <MODE>mode == V16SFmode)"
 {
   if (<MODE>mode != V16SFmode && !TARGET_AVX512VL)
     {
@@ -9173,7 +9175,7 @@
   [(set (match_operand:V16SI 0 "register_operand" "=v")
 	(any_fix:V16SI
 	  (match_operand:V16SF 1 "<round_saeonly_nimm_predicate>" "<round_saeonly_constraint>")))]
-  "TARGET_AVX512F"
+  "TARGET_AVX512F || (TARGET_KNC && V16SFmode == GET_MODE (operands[1]))"
   "vcvttps2<fixsuffix>dq\t{<round_saeonly_mask_op2>%1, %0<mask_operand2>|%0<mask_operand2>, %1<round_saeonly_mask_op2>}"
   [(set_attr "type" "ssecvt")
    (set_attr "prefix" "evex")

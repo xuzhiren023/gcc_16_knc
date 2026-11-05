@@ -47,6 +47,45 @@
    (V8SI "TARGET_AVX") V4SI
    (V4DI "TARGET_AVX") V2DI])
 
+;; VF1 copy for floatuns and the signed float named insn permitted by
+;; ADR-0008 point 5 (S5-08 lead amendment).  Mask/round guards stay off.
+(define_mode_iterator VF1_KNC
+  [(V16SF "TARGET_AVX512F || TARGET_KNC") (V8SF "TARGET_AVX") V4SF])
+
+;; Same-width conversions, Intel 327364-001 pp.157-179, ADR-0008 4/5.
+;; These precede the sse.md named insns and accept all their base operands.
+;; Bm permits only aligned full-width memory; nonimmediate_operand also
+;; covers vector_operand so recog cannot fall through to the x86 insns.
+;; Immediate 0 means no exponent adjustment, with MXCSR rounding.
+(define_insn "*knc_floatv16siv16sf2"
+  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
+        (float:V16SF
+          (match_operand:V16SI 1 "nonimmediate_operand" "YJBm")))]
+  "TARGET_KNC"
+  "vcvtfxpntdq2ps\t{$0, %g1, %g0|%g0, %g1, 0}"
+  [(set_attr "type" "ssecvt")
+   (set_attr "mode" "XI")])
+
+(define_insn "*knc_floatunsv16siv16sf2"
+  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
+        (unsigned_float:V16SF
+          (match_operand:V16SI 1 "nonimmediate_operand" "YJBm")))]
+  "TARGET_KNC"
+  "vcvtfxpntudq2ps\t{$0, %g1, %g0|%g0, %g1, 0}"
+  [(set_attr "type" "ssecvt")
+   (set_attr "mode" "XI")])
+
+;; Immediate 3 truncates regardless of MXCSR.RC, without suppressing IE/PE
+;; (convert card probe, docs/research/card-runs-s5.md).  Bits 2/3 stay zero.
+(define_insn "*knc_fix<fixunssuffix>_truncv16sfv16si2"
+  [(set (match_operand:V16SI 0 "register_operand" "=YJ")
+        (any_fix:V16SI
+          (match_operand:V16SF 1 "nonimmediate_operand" "YJBm")))]
+  "TARGET_KNC"
+  "vcvtfxpntps2<fixsuffix>dq\t{$3, %g1, %g0|%g0, %g1, 3}"
+  [(set_attr "type" "ssecvt")
+   (set_attr "mode" "XI")])
+
 (define_mode_iterator KNC_SCALAR [SF DF SI DI TI TF])
 (define_mode_iterator KNC_BROADCAST [SF DF SI DI])
 (define_mode_iterator KNC_PAIR [TI TF])
