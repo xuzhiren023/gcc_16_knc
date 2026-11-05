@@ -1361,3 +1361,113 @@
   "TARGET_KNC"
   "vpsrad\t{$1, %g1, %g0|%g0, %g1, 1}"
   [(set_attr "type" "sseishft") (set_attr "mode" "XI")])
+
+;; S5-11: FP32 division, research/knc-div-sqrt.md section 2.
+;; Expander-only VFH copy; FP64 division remains unavailable on KNC.
+(define_mode_iterator VFH_KNC_DIV
+  [(V32HF "TARGET_AVX512FP16")
+   (V16HF "TARGET_AVX512FP16 && TARGET_AVX512VL")
+   (V8HF "TARGET_AVX512FP16 && TARGET_AVX512VL")
+   (V16SF "TARGET_AVX512F || TARGET_KNC") (V8SF "TARGET_AVX") V4SF
+   (V8DF "TARGET_AVX512F") (V4DF "TARGET_AVX") (V2DF "TARGET_SSE2")])
+(define_c_enum "unspec"
+  [UNSPEC_KNC_DIV_MANT UNSPEC_KNC_DIV_RCP UNSPEC_KNC_DIV_SUB
+   UNSPEC_KNC_DIV_SCALE_RU UNSPEC_KNC_DIV_SCALE_RD])
+(define_c_enum "unspecv" [UNSPECV_KNC_DIV_FLAGS UNSPECV_KNC_DIV_UNDERFLOW UNSPECV_KNC_DIV_MXCSR])
+
+(define_insn "knc_div_mant"
+  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
+        (unspec:V16SF [(match_operand:V16SF 1 "register_operand" "YJ")
+                       (match_operand:SI 2 "const_int_operand")]
+                      UNSPEC_KNC_DIV_MANT))]
+  "TARGET_KNC"
+  "vgetmantps\t{%{sae%}, %2, %g1, %g0|%g0, %g1, %2, %{sae%}}"
+  [(set_attr "type" "sse") (set_attr "mode" "V16SF")])
+
+(define_insn "knc_div_rcp"
+  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
+        (unspec:V16SF [(match_operand:V16SF 1 "register_operand" "YJ")]
+                      UNSPEC_KNC_DIV_RCP))]
+  "TARGET_KNC"
+  "vrcp23ps\t{%{sae%}, %g1, %g0|%g0, %g1, %{sae%}}"
+  [(set_attr "type" "sse") (set_attr "mode" "V16SF")])
+
+(define_insn "knc_div_sub"
+  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
+        (unspec:V16SF [(match_operand:V16SF 1 "register_operand" "YJ")
+                       (match_operand:V16SF 2 "register_operand" "YJ")]
+                      UNSPEC_KNC_DIV_SUB))]
+  "TARGET_KNC"
+  "vsubps\t{%{rn-sae%}, %g2, %g1, %g0|%g0, %g1, %g2, %{rn-sae%}}"
+  [(set_attr "type" "sseadd") (set_attr "mode" "V16SF")])
+
+;; The masked reciprocal also raises #Z with an unused result.  Keeping
+;; this one instruction volatile prevents deletion of that flag update.
+(define_insn "knc_div_rcp_flags"
+  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
+        (unspec_volatile:V16SF
+          [(match_operand:V16SF 1 "register_operand" "YJ")
+           (match_operand:V16SF 2 "register_operand" "0")
+           (match_operand:HI 3 "register_operand" "YL")]
+          UNSPECV_KNC_DIV_FLAGS))]
+  "TARGET_KNC"
+  "vrcp23ps\t{%g1, %g0%{%3%}|%g0%{%3%}, %g1}"
+  [(set_attr "type" "sse") (set_attr "mode" "V16SF")])
+
+(define_insn "knc_div_underflow"
+  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
+        (unspec_volatile:V16SF
+          [(match_operand:V16SF 1 "register_operand" "0")
+           (match_operand:V16SF 2 "register_operand" "YJ")
+           (match_operand:HI 3 "register_operand" "YL")]
+          UNSPECV_KNC_DIV_UNDERFLOW))]
+  "TARGET_KNC"
+  "vmulps\t{%g2, %g1, %g0%{%3%}|%g0%{%3%}, %g1, %g2}"
+  [(set_attr "type" "ssemul") (set_attr "mode" "V16SF")])
+
+(define_insn "knc_div_mxcsr"
+  [(set (match_operand:SI 0 "memory_operand" "=m")
+        (unspec_volatile:SI [(const_int 0)] UNSPECV_KNC_DIV_MXCSR))]
+  "TARGET_KNC"
+  "stmxcsr\t%0"
+  [(set_attr "type" "sse") (set_attr "memory" "store")])
+
+(define_insn "knc_div_scale_ru"
+  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
+        (vec_merge:V16SF
+          (unspec:V16SF [(match_operand:V16SF 1 "register_operand" "YJ")
+                         (match_operand:V16SI 2 "register_operand" "YJ")]
+                        UNSPEC_KNC_DIV_SCALE_RU)
+          (match_operand:V16SF 3 "register_operand" "0")
+          (match_operand:HI 4 "register_operand" "YL")))]
+  "TARGET_KNC"
+  "vscaleps\t{%{ru%}, %g2, %g1, %g0%{%4%}|%g0%{%4%}, %g1, %g2, %{ru%}}"
+  [(set_attr "type" "ssemul") (set_attr "mode" "V16SF")])
+
+(define_insn "knc_div_scale_rd"
+  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
+        (vec_merge:V16SF
+          (unspec:V16SF [(match_operand:V16SF 1 "register_operand" "YJ")
+                         (match_operand:V16SI 2 "register_operand" "YJ")]
+                        UNSPEC_KNC_DIV_SCALE_RD)
+          (match_operand:V16SF 3 "register_operand" "0")
+          (match_operand:HI 4 "register_operand" "YL")))]
+  "TARGET_KNC"
+  "vscaleps\t{%{rd%}, %g2, %g1, %g0%{%4%}|%g0%{%4%}, %g1, %g2, %{rd%}}"
+  [(set_attr "type" "ssemul") (set_attr "mode" "V16SF")])
+
+(define_insn "knc_div_shift_left"
+  [(set (match_operand:V16SI 0 "register_operand" "=YJ")
+        (ashift:V16SI (match_operand:V16SI 1 "register_operand" "YJ")
+                       (match_operand:V16SI 2 "register_operand" "YJ")))]
+  "TARGET_KNC"
+  "vpsllvd\t{%g2, %g1, %g0|%g0, %g1, %g2}"
+  [(set_attr "type" "sseishft") (set_attr "mode" "XI")])
+
+(define_insn "knc_div_shift_right"
+  [(set (match_operand:V16SI 0 "register_operand" "=YJ")
+        (lshiftrt:V16SI (match_operand:V16SI 1 "register_operand" "YJ")
+                       (match_operand:V16SI 2 "register_operand" "YJ")))]
+  "TARGET_KNC"
+  "vpsrlvd\t{%g2, %g1, %g0|%g0, %g1, %g2}"
+  [(set_attr "type" "sseishft") (set_attr "mode" "XI")])
