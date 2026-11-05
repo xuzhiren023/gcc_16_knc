@@ -643,14 +643,41 @@
    (set_attr "memory" "none")
    (set_attr "length" "7")])
 
+;; Intel 327364-001 VPERMD p.480: lane N takes dword (operand 2)[N] bits 3:0
+;; of operand 1.  Only those four index bits are read, so a rotation index
+;; needs no AND.  The 8-lane modes rotate by dword pairs.
+(define_c_enum "unspec" [UNSPEC_KNC_PERMVAR])
+(define_insn "knc_permvar<mode>"
+  [(set (match_operand:KNC_PACKED 0 "register_operand" "=YJ")
+	(unspec:KNC_PACKED
+	  [(match_operand:KNC_PACKED 1 "register_operand" "YJ")
+	   (match_operand:V16SI 2 "register_operand" "YJ")]
+	  UNSPEC_KNC_PERMVAR))]
+  "TARGET_KNC"
+  "vpermd\t{%g1, %g2, %g0|%g0, %g2, %g1}"
+  [(set_attr "type" "sselog1")
+   (set_attr "mode" "XI")])
+
 ;; maskload (operand 1 is memory, else value zero) and maskstore (operand 0
 ;; is memory) for the shared sse.md expanders, which may not FAIL.  A
 ;; 64-byte aligned access is one masked move behind an empty-mask guard:
 ;; jkzd for HI, a byte test for QI, whose bits 15:8 are undefined (point 1).
-;; Any other alignment needs S4-05's split; until then the cost term in
-;; ix86_vector_costs::add_stmt_cost keeps such loops scalar, and this
-;; fallback, reached only when costs are ignored, moves each element whose
-;; mask bit is set through a GPR, touching nothing the scalar loop does not.
+;; An element-aligned address A is split over its lines L0 = A & -64 and
+;; L0 + 64 (S4-14): with s = (A & 63) / element size and L lanes, lane J
+;; lives in L0 lane J + s when J + s < L, else in the next line's lane
+;; J + s - L.  The masks (k << s) & (2^L - 1) and k >> (L - s) are formed
+;; in a GPR from the zero-extended mask (so a QI mask's bits 15:8 are
+;; dropped), and each line is one aligned masked move behind a GPR test of
+;; its mask.  A line is thus touched only when it holds an active element,
+;; which the scalar loop accesses too, and no move runs with an empty mask
+;; (S3-03's fault rules).  Loads merge both lines into a zeroed register
+;; (disjoint lanes) and rotate it down by s with vpermd; stores rotate the
+;; data up by s first.  The dword index is iota + d for loads and iota - d
+;; for stores, with d = (A & 63) / 4 for both element sizes.  The cost
+;; term in ix86_vector_costs::add_stmt_cost still keeps loops with such
+;; accesses scalar unless costs are ignored (S4-14 kept it).  An address
+;; below element alignment keeps the fallback that moves each active
+;; element through a GPR, touching nothing the scalar loop does not.
 (define_expand "@knc_maskmove<mode>"
   [(match_operand:KNC_PACKED 0 "nonimmediate_operand")
    (match_operand:KNC_PACKED 1 "nonimmediate_operand")
@@ -676,6 +703,73 @@
       else
 	emit_insn (gen_knc_maskstore_aligned<mode> (mem, data, mask));
       emit_label (skip);
+    }
+  else if (ix86_knc_element_aligned_mem_p (mem, <MODE>mode))
+    {
+      unsigned int lanes = GET_MODE_NUNITS (<MODE>mode);
+      int log2_size = exact_log2 (GET_MODE_UNIT_SIZE (<MODE>mode));
+      rtx addr = force_reg (Pmode, XEXP (mem, 0));
+      rtx line = expand_simple_binop (Pmode, AND, addr, GEN_INT (-64),
+				      NULL_RTX, 1, OPTAB_DIRECT);
+      rtx lines[2];
+      lines[0] = change_address (mem, <MODE>mode, line);
+      set_mem_align (lines[0], 512);
+      lines[1] = adjust_address (lines[0], <MODE>mode, 64);
+      set_mem_align (lines[1], 512);
+      rtx off = expand_simple_binop (SImode, AND, gen_lowpart (SImode, addr),
+				     GEN_INT (63), NULL_RTX, 1, OPTAB_DIRECT);
+      rtx s = expand_simple_binop (SImode, LSHIFTRT, off, GEN_INT (log2_size),
+				   NULL_RTX, 1, OPTAB_DIRECT);
+      rtx d = expand_simple_binop (SImode, LSHIFTRT, off, GEN_INT (2),
+				   NULL_RTX, 1, OPTAB_DIRECT);
+      rtx kk = force_reg (SImode, convert_to_mode (SImode, mask, 1));
+      rtx masks[2];
+      masks[0] = expand_simple_binop (SImode, ASHIFT, kk, s, NULL_RTX, 1,
+				      OPTAB_DIRECT);
+      masks[0] = expand_simple_binop (SImode, AND, masks[0],
+				      GEN_INT ((1 << lanes) - 1), NULL_RTX, 1,
+				      OPTAB_DIRECT);
+      rtx rest = expand_simple_binop (SImode, MINUS, GEN_INT (lanes), s,
+				      NULL_RTX, 1, OPTAB_DIRECT);
+      masks[1] = expand_simple_binop (SImode, LSHIFTRT, kk, rest, NULL_RTX, 1,
+				      OPTAB_DIRECT);
+      rtx shift = gen_reg_rtx (V16SImode);
+      ix86_knc_expand_duplicate (shift, d);
+      rtx iota = force_reg (V16SImode, gen_const_vec_series (V16SImode,
+							     const0_rtx,
+							     const1_rtx));
+      rtx idx = gen_reg_rtx (V16SImode);
+      emit_insn (gen_rtx_SET (idx, load
+				   ? gen_rtx_PLUS (V16SImode, iota, shift)
+				   : gen_rtx_MINUS (V16SImode, iota, shift)));
+      rtx lanes_data = data;
+      if (!load)
+	{
+	  lanes_data = gen_reg_rtx (<MODE>mode);
+	  emit_insn (gen_knc_permvar<mode> (lanes_data, force_reg (<MODE>mode,
+								   data),
+					    idx));
+	}
+      for (int i = 0; i < 2; i++)
+	{
+	  rtx skip = gen_label_rtx ();
+	  emit_cmp_and_jump_insns (masks[i], const0_rtx, EQ, NULL_RTX, SImode,
+				   1, skip);
+	  rtx k = gen_reg_rtx (<knc_maskmode>mode);
+	  emit_move_insn (k, gen_lowpart (<knc_maskmode>mode, masks[i]));
+	  if (load)
+	    emit_insn (gen_knc_maskload_aligned<mode> (lanes_data, lines[i],
+						       lanes_data, k));
+	  else
+	    emit_insn (gen_knc_maskstore_aligned<mode> (lines[i], lanes_data,
+							k));
+	  emit_label (skip);
+	}
+      if (load)
+	{
+	  data = gen_reg_rtx (<MODE>mode);
+	  emit_insn (gen_knc_permvar<mode> (data, lanes_data, idx));
+	}
     }
   else
     {
