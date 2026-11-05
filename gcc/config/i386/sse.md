@@ -10662,7 +10662,7 @@
 		       (const_int 2) (const_int 3)
 		       (const_int 4) (const_int 5)
 		       (const_int 6) (const_int 7)]))))]
-  "TARGET_AVX512F || (TARGET_KNC && GET_MODE (operands[1]) == V16SFmode)"
+  "TARGET_AVX512F || (TARGET_KNC && ix86_knc_packed_mode_p (V16SFmode))"
   "vcvtps2pd\t{%t1, %0|%0, %t1}"
   [(set_attr "type" "ssecvt")
    (set_attr "prefix" "evex")
