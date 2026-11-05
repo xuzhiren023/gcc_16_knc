@@ -27004,7 +27004,8 @@ ix86_vector_costs::finish_cost (const vector_costs *scalar_costs)
       && !((GET_MODE_SIZE (loop_vinfo->vector_mode)
 	    / LOOP_VINFO_VECT_FACTOR (loop_vinfo).to_constant () == 16)
 	   && ix86_tune_features[X86_TUNE_AVX512_TWO_EPILOGUES])
-      && ix86_tune_features[X86_TUNE_AVX512_MASKED_EPILOGUES]
+      && (ix86_tune_features[X86_TUNE_AVX512_MASKED_EPILOGUES]
+	  || (TARGET_KNC && ix86_knc_masked_epilogue_p (loop_vinfo)))
       && !OPTION_SET_P (param_vect_partial_vector_usage))
     {
       bool avoid = false;
