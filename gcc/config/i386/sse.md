@@ -3081,10 +3081,15 @@
   "TARGET_SSE2")
 
 (define_expand "sqrt<mode>2"
-  [(set (match_operand:VF1 0 "register_operand")
-	(sqrt:VF1 (match_operand:VF1 1 "vector_operand")))]
-  "TARGET_SSE"
+  [(set (match_operand:VF1_KNC 0 "register_operand")
+	(sqrt:VF1_KNC (match_operand:VF1_KNC 1 "vector_operand")))]
+  "TARGET_SSE || (TARGET_KNC && <MODE>mode == V16SFmode)"
 {
+  if (TARGET_KNC)
+    {
+      ix86_knc_expand_sqrt (operands);
+      DONE;
+    }
   if (TARGET_SSE_MATH
       && TARGET_RECIP_VEC_SQRT
       && !optimize_insn_for_size_p ()

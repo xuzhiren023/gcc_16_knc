@@ -7972,7 +7972,7 @@ find_drap_reg (void)
   if (TARGET_64BIT)
     {
       /* In preserve_none functions, any register can be used for DRAP,
-	 except AX, R12–R15, DI, SI (argument registers), SP, and BP.  */
+	 except AX, R12â€“R15, DI, SI (argument registers), SP, and BP.  */
       if (cfun->machine->call_saved_registers == TYPE_PRESERVE_NONE)
 	return R11_REG;
 
@@ -22568,6 +22568,8 @@ static bool
 ix86_rtx_costs (rtx x, machine_mode mode, int outer_code_i, int opno,
 		int *total, bool speed)
 {
+  if (TARGET_KNC && ix86_knc_sqrt_rtx_cost (x, mode, total))
+    return false;
   rtx mask;
   enum rtx_code code = GET_CODE (x);
   enum rtx_code outer_code = (enum rtx_code) outer_code_i;
@@ -26253,6 +26255,14 @@ ix86_vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
 				  tree vectype, int,
 				  vect_cost_model_location where)
 {
+  if (TARGET_KNC && ix86_knc_sqrt_stmt_p (kind, stmt_info, vectype))
+    {
+      unsigned cost = adjust_cost_for_freq (stmt_info, where, count
+	* ix86_knc_sqrt_stmt_cost (kind == scalar_stmt
+				  ? TREE_TYPE (vectype) : vectype));
+      m_costs[where] += cost;
+      return cost;
+    }
   unsigned retval = 0;
   bool scalar_p
     = (kind == scalar_stmt || kind == scalar_load || kind == scalar_store);
