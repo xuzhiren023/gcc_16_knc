@@ -832,7 +832,7 @@ ix86_knc_two_input_perm_p (machine_mode mode, stmt_vec_info stmt_info,
 bool
 ix86_knc_reduc_swizzle_p (rtx selector, machine_mode mode)
 {
-  unsigned int nelt = GET_MODE_NUNITS (mode).to_constant ();
+  unsigned int nelt = GET_MODE_NUNITS (mode);
   if (GET_CODE (selector) != PARALLEL
       || XVECLEN (selector, 0) != (int) nelt
       || !CONST_INT_P (XVECEXP (selector, 0, 0)))
@@ -858,7 +858,7 @@ void
 ix86_knc_expand_reduc (enum rtx_code code, rtx dest, rtx src)
 {
   machine_mode mode = GET_MODE (src);
-  unsigned int nelt = GET_MODE_NUNITS (mode).to_constant ();
+  unsigned int nelt = GET_MODE_NUNITS (mode);
   bool carry = mode == V8DImode && code == PLUS;
   gcc_assert (ix86_knc_packed_mode_p (mode));
   gcc_assert (code == PLUS
