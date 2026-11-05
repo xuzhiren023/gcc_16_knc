@@ -826,3 +826,79 @@ ix86_knc_two_input_perm_p (machine_mode mode, stmt_vec_info stmt_info,
   return (SLP_TREE_LANES (node) < group
 	  || !multiple_p (GET_MODE_NUNITS (mode), group));
 }
+
+/* True for exactly the {cdab} and {badc} selectors at the element size
+   of MODE.  Reject partial selectors and anything crossing a group.  */
+bool
+ix86_knc_reduc_swizzle_p (rtx selector, machine_mode mode)
+{
+  unsigned int nelt = GET_MODE_NUNITS (mode);
+  if (GET_CODE (selector) != PARALLEL
+      || XVECLEN (selector, 0) != (int) nelt
+      || !CONST_INT_P (XVECEXP (selector, 0, 0)))
+    return false;
+  HOST_WIDE_INT distance = INTVAL (XVECEXP (selector, 0, 0));
+  if (distance != 1 && distance != 2)
+    return false;
+  for (unsigned int i = 0; i < nelt; ++i)
+    if (!CONST_INT_P (XVECEXP (selector, 0, i))
+        || INTVAL (XVECEXP (selector, 0, i)) != (i ^ distance))
+      return false;
+  return true;
+}
+
+/* ADR-0008 point 2, Intel 327364-001 pp.28-30 and p.482: reduce halves,
+   then 128-bit blocks, then pairs.  Swizzles fold into the second source
+   of the arithmetic.  GCC only requests FP PLUS when reassociation is
+   allowed; no fold_left_plus is supplied here.
+
+   V8DI PLUS uses S4-04's visible carry sequence.  Its operations are on
+   dwords, so shuffle whole qwords first rather than swizzling the add.  */
+void
+ix86_knc_expand_reduc (enum rtx_code code, rtx dest, rtx src)
+{
+  machine_mode mode = GET_MODE (src);
+  unsigned int nelt = GET_MODE_NUNITS (mode);
+  bool carry = mode == V8DImode && code == PLUS;
+  gcc_assert (ix86_knc_packed_mode_p (mode));
+  gcc_assert (code == PLUS
+              || (mode == V16SImode
+                  && (code == SMIN || code == SMAX
+                      || code == UMIN || code == UMAX))
+              || ((mode == V16SImode || mode == V8DImode)
+                  && (code == AND || code == IOR || code == XOR)));
+
+  for (unsigned int distance = nelt / 2; distance; distance /= 2)
+    {
+      rtx other;
+      if (distance >= 4 || carry)
+        {
+          other = gen_reg_rtx (mode);
+          if (carry && distance == 1)
+            emit_insn (gen_knc_pshufd (mode, other, src, GEN_INT (0x4e)));
+          else
+            emit_insn (gen_knc_permf32x4 (mode, other, src,
+                                        GEN_INT (distance == nelt / 2
+                                                 ? 0x4e : 0xb1)));
+        }
+      else
+        {
+          rtvec lanes = rtvec_alloc (nelt);
+          for (unsigned int i = 0; i < nelt; ++i)
+            RTVEC_ELT (lanes, i) = GEN_INT (i ^ distance);
+          other = gen_rtx_VEC_SELECT (mode, src,
+                                     gen_rtx_PARALLEL (VOIDmode, lanes));
+        }
+      rtx result = gen_reg_rtx (mode);
+      if (carry)
+        emit_insn (gen_addv8di3 (result, src, other));
+      else
+        emit_insn (gen_rtx_SET (result,
+                               gen_rtx_fmt_ee (code, mode, src, other)));
+      src = result;
+    }
+
+  /* Lane zero uses the existing scalar zmm transport (ADR-0004).  Any
+     bridge to a GPR or x87 remains visible to register allocation.  */
+  emit_move_insn (dest, gen_lowpart (GET_MODE (dest), src));
+}

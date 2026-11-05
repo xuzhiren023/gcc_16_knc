@@ -1151,3 +1151,60 @@
   emit_move_insn (operands[0], gen_lowpart (V8DImode, result));
   DONE;
 })
+
+;; S5-07: reductions use the register-only SwizzUpConv operand (Intel
+;; 327364-001 pp.28-30).  The selector is an exact VEC_SELECT: every lane
+;; is XORed with 1 ({cdab}) or 2 ({badc}), in the instruction's element
+;; size.  No rounding override may share these swizzle bits.
+(define_code_iterator KNC_REDUC_INT [plus smin smax umin umax])
+(define_code_attr knc_reduc_int
+  [(plus "addd") (smin "minsd") (smax "maxsd")
+   (umin "minud") (umax "maxud")])
+
+(define_insn "*knc_reduc_plus<mode>_swizzle"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
+        (plus:KNC_FP
+          (match_operand:KNC_FP 1 "register_operand" "YJ")
+          (vec_select:KNC_FP
+            (match_operand:KNC_FP 2 "register_operand" "YJ")
+            (match_parallel 3 ""
+              [(match_operand 4 "const_int_operand")]))))]
+  "TARGET_KNC && ix86_knc_reduc_swizzle_p (operands[3], <MODE>mode)"
+{
+  if (INTVAL (operands[4]) == 1)
+    return "vadd<knc_fp_suffix>\t{%g2%{cdab%}, %g1, %g0|%g0, %g1, %g2%{cdab%}}";
+  return "vadd<knc_fp_suffix>\t{%g2%{badc%}, %g1, %g0|%g0, %g1, %g2%{badc%}}";
+}
+  [(set_attr "type" "sseadd") (set_attr "mode" "<MODE>")])
+
+(define_insn "*knc_reduc_<code>v16si_swizzle"
+  [(set (match_operand:V16SI 0 "register_operand" "=YJ")
+        (KNC_REDUC_INT:V16SI
+          (match_operand:V16SI 1 "register_operand" "YJ")
+          (vec_select:V16SI
+            (match_operand:V16SI 2 "register_operand" "YJ")
+            (match_parallel 3 ""
+              [(match_operand 4 "const_int_operand")]))))]
+  "TARGET_KNC && ix86_knc_reduc_swizzle_p (operands[3], V16SImode)"
+{
+  if (INTVAL (operands[4]) == 1)
+    return "vp<knc_reduc_int>\t{%g2%{cdab%}, %g1, %g0|%g0, %g1, %g2%{cdab%}}";
+  return "vp<knc_reduc_int>\t{%g2%{badc%}, %g1, %g0|%g0, %g1, %g2%{badc%}}";
+}
+  [(set_attr "type" "sseiadd") (set_attr "mode" "XI")])
+
+(define_insn "*knc_reduc_<code><mode>_swizzle"
+  [(set (match_operand:KNC_INT 0 "register_operand" "=YJ")
+        (any_logic:KNC_INT
+          (match_operand:KNC_INT 1 "register_operand" "YJ")
+          (vec_select:KNC_INT
+            (match_operand:KNC_INT 2 "register_operand" "YJ")
+            (match_parallel 3 ""
+              [(match_operand 4 "const_int_operand")]))))]
+  "TARGET_KNC && ix86_knc_reduc_swizzle_p (operands[3], <MODE>mode)"
+{
+  if (INTVAL (operands[4]) == 1)
+    return "vp<logic><knc_int_suffix>\t{%g2%{cdab%}, %g1, %g0|%g0, %g1, %g2%{cdab%}}";
+  return "vp<logic><knc_int_suffix>\t{%g2%{badc%}, %g1, %g0|%g0, %g1, %g2%{badc%}}";
+}
+  [(set_attr "type" "sselog") (set_attr "mode" "XI")])
