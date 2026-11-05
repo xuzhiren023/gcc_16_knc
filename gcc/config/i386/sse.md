@@ -3994,12 +3994,14 @@
 (define_mode_iterator REDUC_PLUS_MODE
  [(V4DF "TARGET_AVX") (V8SF "TARGET_AVX")
   (V16HF "TARGET_AVX512FP16 && TARGET_AVX512VL")
-  (V8DF "TARGET_AVX512F || ix86_knc_packed_mode_p (V8DFmode)") (V16SF "TARGET_AVX512F || ix86_knc_packed_mode_p (V16SFmode)")
+  (V8DF "TARGET_AVX512F || ix86_knc_packed_mode_p (V8DFmode)")
+  (V16SF "TARGET_AVX512F || ix86_knc_packed_mode_p (V16SFmode)")
   (V32HF "TARGET_AVX512FP16 && TARGET_AVX512VL")
   (V32QI "TARGET_AVX") (V16HI "TARGET_AVX")
   (V8SI "TARGET_AVX")  (V4DI "TARGET_AVX")
   (V64QI "TARGET_AVX512F") (V32HI "TARGET_AVX512F")
-  (V16SI "TARGET_AVX512F || ix86_knc_packed_mode_p (V16SImode)") (V8DI "TARGET_AVX512F || ix86_knc_packed_mode_p (V8DImode)")])
+  (V16SI "TARGET_AVX512F || ix86_knc_packed_mode_p (V16SImode)")
+  (V8DI "TARGET_AVX512F || ix86_knc_packed_mode_p (V8DImode)")])
 
 (define_expand "reduc_plus_scal_<mode>"
  [(plus:REDUC_PLUS_MODE
@@ -4046,7 +4048,8 @@
    (V8SF "TARGET_AVX") (V4DF "TARGET_AVX")
    (V64QI "TARGET_AVX512BW")
    (V32HF "TARGET_AVX512FP16 && TARGET_AVX512VL")
-   (V32HI "TARGET_AVX512BW") (V16SI "TARGET_AVX512F || ix86_knc_packed_mode_p (V16SImode)")
+   (V32HI "TARGET_AVX512BW")
+   (V16SI "TARGET_AVX512F || ix86_knc_packed_mode_p (V16SImode)")
    (V8DI "TARGET_AVX512F") (V16SF "TARGET_AVX512F")
    (V8DF "TARGET_AVX512F")])
 
@@ -4329,7 +4332,8 @@
  [(V32QI "TARGET_AVX") (V16HI "TARGET_AVX")
   (V8SI "TARGET_AVX")  (V4DI "TARGET_AVX")
   (V64QI "TARGET_AVX512F") (V32HI "TARGET_AVX512F")
-  (V16SI "TARGET_AVX512F || ix86_knc_packed_mode_p (V16SImode)") (V8DI "TARGET_AVX512F || ix86_knc_packed_mode_p (V8DImode)")])
+  (V16SI "TARGET_AVX512F || ix86_knc_packed_mode_p (V16SImode)")
+  (V8DI "TARGET_AVX512F || ix86_knc_packed_mode_p (V8DImode)")])
 
 (define_expand "reduc_<code>_scal_<mode>"
  [(any_logic:REDUC_ANY_LOGIC_MODE
