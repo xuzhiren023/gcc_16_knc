@@ -16606,7 +16606,15 @@
 	  (match_operand:VI_AVX2_KNC 1 "vector_operand")
 	  (match_operand:VI_AVX2_KNC 2 "vector_operand")))]
   "TARGET_SSE2 || ix86_knc_packed_mode_p (<MODE>mode)"
-  "ix86_fixup_binary_operands_no_copy (<CODE>, <MODE>mode, operands);")
+{
+  if (TARGET_KNC)
+    {
+      emit_insn (gen_knc_plusminus (<CODE>, <MODE>mode, operands[0],
+				    operands[1], operands[2]));
+      DONE;
+    }
+  ix86_fixup_binary_operands_no_copy (<CODE>, <MODE>mode, operands);
+})
 
 (define_expand "cond_<insn><mode>"
   [(set (match_operand:VI1248_AVX512VLBW 0 "register_operand")
