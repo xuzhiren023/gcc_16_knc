@@ -745,6 +745,95 @@
   [(set_attr "type" "<knc_fp_type>")
    (set_attr "mode" "<MODE>")])
 
+;; Masked FMA (S4-05, Intel 327364-001 VFMADD231PS/PD): active lanes get
+;; operand 1 * operand 2 + operand 3 with one rounding, like the unmasked
+;; body; the others keep operand 3 and raise no exception (2.1.2, p.22).
+(define_insn "knc_fma<mode>_mask"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
+	(vec_merge:KNC_FP
+	  (fma:KNC_FP
+	    (match_operand:KNC_FP 1 "register_operand" "YJ")
+	    (match_operand:KNC_FP 2 "register_operand" "YJ")
+	    (match_operand:KNC_FP 3 "register_operand" "0"))
+	  (match_dup 3)
+	  (match_operand:<knc_maskmode> 4 "register_operand" "YL")))]
+  "TARGET_KNC"
+  "vfmadd231<knc_fp_suffix>\t{%g2, %g1, %g0%{%4%}|%g0%{%4%}, %g1, %g2}"
+  [(set_attr "type" "ssemuladd")
+   (set_attr "mode" "<MODE>")])
+
+;; cond_fma: sse.md's cond_fma<mode> calls this on entry under KNC.  There
+;; is no {z} form, so an else value other than the addend is blended into
+;; the addend first (vblendm, the mask selecting the addend); the masked
+;; vfmadd231 then leaves the else value in the inactive lanes.  Unlike an
+;; unmasked FMA followed by a blend, no inactive lane is computed.
+(define_expand "@knc_cond_fma<mode>"
+  [(match_operand:KNC_FP 0 "register_operand")
+   (match_operand:<knc_maskmode> 1 "register_operand")
+   (match_operand:KNC_FP 2 "vector_operand")
+   (match_operand:KNC_FP 3 "vector_operand")
+   (match_operand:KNC_FP 4 "vector_operand")
+   (match_operand:KNC_FP 5 "nonimm_or_0_operand")]
+  "TARGET_KNC"
+{
+  rtx mask = operands[1];
+  rtx acc = gen_reg_rtx (<MODE>mode);
+  if (rtx_equal_p (operands[4], operands[5]))
+    emit_move_insn (acc, operands[4]);
+  else
+    emit_insn (gen_rtx_SET (acc,
+			    gen_rtx_VEC_MERGE (<MODE>mode, operands[4],
+					       force_reg (<MODE>mode,
+							  operands[5]),
+					       mask)));
+  emit_insn (gen_knc_fma<mode>_mask (acc, force_reg (<MODE>mode, operands[2]),
+				     force_reg (<MODE>mode, operands[3]),
+				     acc, mask));
+  emit_move_insn (operands[0], acc);
+  DONE;
+})
+
+;; while_ult (S4-05, ADR-0007 point 7): lane I of operand 0 is set when
+;; operand 1 + I < operand 2 (unsigned), for I below operand 3.  The lane
+;; count min (operand 2 - operand 1, operand 3), or 0, is formed in a GPR
+;; without branches (no cmov under KNC), and (1 << count) - 1 moves to the
+;; mask.  An 8-lane mask is at most 0xff, so bits 15:8 stay clear.
+(define_mode_iterator KNC_WCMP [SI (DI "TARGET_64BIT")])
+(define_mode_iterator KNC_WMASK [HI QI])
+(define_expand "while_ult<KNC_WCMP:mode><KNC_WMASK:mode>"
+  [(match_operand:KNC_WMASK 0 "register_operand")
+   (match_operand:KNC_WCMP 1 "register_operand")
+   (match_operand:KNC_WCMP 2 "register_operand")
+   (match_operand 3 "const_int_operand")]
+  "TARGET_KNC"
+{
+  machine_mode cmode = <KNC_WCMP:MODE>mode;
+  rtx lanes = GEN_INT (INTVAL (operands[3]));
+  /* All ones when operand 1 < operand 2, else zero.  */
+  rtx live = emit_store_flag_force (gen_reg_rtx (cmode), LTU, operands[1],
+				    operands[2], cmode, 1, -1);
+  rtx left = expand_simple_binop (cmode, MINUS, operands[2], operands[1],
+				  NULL_RTX, 1, OPTAB_DIRECT);
+  left = expand_simple_binop (cmode, AND, left, live, NULL_RTX, 1,
+			      OPTAB_DIRECT);
+  /* min (left, lanes) = lanes + ((left - lanes) & (left < lanes ? -1 : 0)).  */
+  rtx below = emit_store_flag_force (gen_reg_rtx (cmode), LTU, left, lanes,
+				     cmode, 1, -1);
+  rtx count = expand_simple_binop (cmode, MINUS, left, lanes, NULL_RTX, 1,
+				   OPTAB_DIRECT);
+  count = expand_simple_binop (cmode, AND, count, below, NULL_RTX, 1,
+			       OPTAB_DIRECT);
+  count = expand_simple_binop (cmode, PLUS, count, lanes, NULL_RTX, 1,
+			       OPTAB_DIRECT);
+  rtx bits = expand_simple_binop (SImode, ASHIFT, const1_rtx,
+				  gen_lowpart (SImode, count), NULL_RTX, 1,
+				  OPTAB_DIRECT);
+  bits = expand_simple_binop (SImode, PLUS, bits, constm1_rtx, NULL_RTX, 1,
+			      OPTAB_DIRECT);
+  emit_move_insn (operands[0], gen_lowpart (<KNC_WMASK:MODE>mode, bits));
+  DONE;
+})
+
 ;; Integer add and sub (ADR-0007 point 6).  sse.md's <insn><mode>3 calls
 ;; this on entry under KNC, so upstream changes to that body (constant
 ;; operands, the +1 to -1 rewrite) never reach KNC.  Constants go to
