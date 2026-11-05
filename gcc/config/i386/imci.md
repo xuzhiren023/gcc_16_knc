@@ -520,10 +520,15 @@
 ;; Under KNC it refuses the quiet UNLT, UNLE, UNGT, UNGE, UNEQ and LTGT:
 ;; they need a guarded compare that the card has not cleared yet (point 5),
 ;; so can_vec_cmp_compare_p reports no support and those loops stay scalar.
+;; With -fno-trapping-math no flag is observable, so UNLT..UNGE are the
+;; signaling nle/nlt.  match.pd folds ~(a < b) into a u>= b there without
+;; asking the target (S4-03: cond_add exposed it as an ICE in expand).
 ;; Any other target keeps the expander's former "" (any comparison).
 (define_special_predicate "knc_vec_cmp_operator"
   (ior (not (match_test "TARGET_KNC"))
-       (match_code "eq,ne,lt,le,gt,ge,ltu,leu,gtu,geu,unordered,ordered")))
+       (match_code "eq,ne,lt,le,gt,ge,ltu,leu,gtu,geu,unordered,ordered")
+       (and (match_code "unlt,unle,ungt,unge")
+	    (match_test "!flag_trapping_math"))))
 
 ;; k1om has no vpcmpq, so V8DI compares stay off (point 6).
 (define_mode_iterator KNC_CMP [V16SF V8DF V16SI])
@@ -581,3 +586,160 @@
   "<knc_blend>\t{%g1, %g2, %g0%{%3%}|%g0%{%3%}, %g2, %g1}"
   [(set_attr "type" "ssemov")
    (set_attr "mode" "XI")])
+
+;; Masked moves (ADR-0007 point 7, Intel 327364-001 VMOVAPS/VMOVAPD/
+;; VMOVDQA32/VMOVDQA64 pp.376-387).  A masked aligned move names exactly
+;; one 64-byte line, so it obeys the line rule when that line holds an
+;; active element: the access is 64-byte aligned and the mask is not empty.
+;; Masks never suppress a fault (S3-03), so every use sits behind a guard.
+;; sse.md's UNSPEC_MASKMOV and UNSPEC_MASKLOAD are declared after this file.
+(define_c_enum "unspec" [UNSPEC_KNC_MASKMOV UNSPEC_KNC_MASKLOAD UNSPEC_KNC_KTEST])
+
+(define_insn "knc_maskstore_aligned<mode>"
+  [(set (match_operand:KNC_PACKED 0 "vector_memory_operand" "=Bm")
+	(unspec:KNC_PACKED
+	  [(match_operand:KNC_PACKED 1 "register_operand" "YJ")
+	   (match_dup 0)
+	   (match_operand:<knc_maskmode> 2 "register_operand" "YL")]
+	  UNSPEC_KNC_MASKMOV))]
+  "TARGET_KNC"
+  "<knc_packed_move>\t{%g1, %0%{%2%}|%0%{%2%}, %g1}"
+  [(set_attr "type" "ssemov")
+   (set_attr "memory" "store")
+   (set_attr "mode" "XI")])
+
+;; Merge-only masking (no {z}): operand 2 is the else value, tied.
+(define_insn "knc_maskload_aligned<mode>"
+  [(set (match_operand:KNC_PACKED 0 "register_operand" "=YJ")
+	(vec_merge:KNC_PACKED
+	  (unspec:KNC_PACKED
+	    [(match_operand:KNC_PACKED 1 "vector_memory_operand" "Bm")]
+	    UNSPEC_KNC_MASKLOAD)
+	  (match_operand:KNC_PACKED 2 "register_operand" "0")
+	  (match_operand:<knc_maskmode> 3 "register_operand" "YL")))]
+  "TARGET_KNC"
+  "<knc_packed_move>\t{%1, %g0%{%3%}|%g0%{%3%}, %1}"
+  [(set_attr "type" "ssemov")
+   (set_attr "memory" "load")
+   (set_attr "mode" "XI")])
+
+;; Intel 327364-001 JKZD/JKNZD pp.73-78: branch on all 16 mask bits.  The
+;; unspec keeps an ordinary HImode test of a short from matching (it would
+;; force the short into a k register).  Inversion swaps eq and ne.
+(define_code_iterator KNC_JK [eq ne])
+(define_code_attr knc_jk [(eq "jkzd") (ne "jknzd")])
+(define_insn "knc_jk<code>"
+  [(set (pc)
+	(if_then_else
+	  (KNC_JK (unspec:HI [(match_operand:HI 0 "register_operand" "YK")]
+			     UNSPEC_KNC_KTEST)
+		  (const_int 0))
+	  (label_ref (match_operand 1))
+	  (pc)))]
+  "TARGET_KNC"
+  "<knc_jk>\t{%l1, %0|%0, %l1}"
+  [(set_attr "type" "ibr")
+   (set_attr "memory" "none")
+   (set_attr "length" "7")])
+
+;; maskload (operand 1 is memory, else value zero) and maskstore (operand 0
+;; is memory) for the shared sse.md expanders, which may not FAIL.  A
+;; 64-byte aligned access is one masked move behind an empty-mask guard:
+;; jkzd for HI, a byte test for QI, whose bits 15:8 are undefined (point 1).
+;; Any other alignment needs S4-05's split; until then the cost term in
+;; ix86_vector_costs::add_stmt_cost keeps such loops scalar, and this
+;; fallback, reached only when costs are ignored, moves each element whose
+;; mask bit is set through a GPR, touching nothing the scalar loop does not.
+(define_expand "@knc_maskmove<mode>"
+  [(match_operand:KNC_PACKED 0 "nonimmediate_operand")
+   (match_operand:KNC_PACKED 1 "nonimmediate_operand")
+   (match_operand:<knc_maskmode> 2 "register_operand")]
+  "TARGET_KNC"
+{
+  bool load = MEM_P (operands[1]);
+  rtx mem = load ? operands[1] : operands[0];
+  rtx mask = operands[2];
+  rtx data = load ? gen_reg_rtx (<MODE>mode) : operands[1];
+  if (load)
+    emit_move_insn (data, CONST0_RTX (<MODE>mode));
+  if (MEM_ALIGN (mem) >= 512)
+    {
+      rtx skip = gen_label_rtx ();
+      if (<knc_maskmode>mode == HImode)
+	emit_jump_insn (gen_knc_jkeq (mask, skip));
+      else
+	emit_cmp_and_jump_insns (mask, const0_rtx, EQ, NULL_RTX, QImode, 1,
+				 skip);
+      if (load)
+	emit_insn (gen_knc_maskload_aligned<mode> (data, mem, data, mask));
+      else
+	emit_insn (gen_knc_maskstore_aligned<mode> (mem, data, mask));
+      emit_label (skip);
+    }
+  else
+    {
+      unsigned int size = GET_MODE_UNIT_SIZE (<MODE>mode);
+      machine_mode emode = size == 4 ? SImode : DImode;
+      rtx slot = assign_stack_temp (<MODE>mode, GET_MODE_SIZE (<MODE>mode));
+      emit_move_insn (slot, data);
+      rtx bits = force_reg (SImode, convert_to_mode (SImode, mask, 1));
+      for (unsigned int i = 0; i < GET_MODE_NUNITS (<MODE>mode); i++)
+	{
+	  rtx next = gen_label_rtx ();
+	  rtx bit = expand_simple_binop (SImode, AND, bits, GEN_INT (1u << i),
+					 NULL_RTX, 1, OPTAB_DIRECT);
+	  emit_cmp_and_jump_insns (bit, const0_rtx, EQ, NULL_RTX, SImode, 1,
+				   next);
+	  rtx from = adjust_address (load ? mem : slot, emode, i * size);
+	  rtx to = adjust_address (load ? slot : mem, emode, i * size);
+	  emit_move_insn (to, force_reg (emode, from));
+	  emit_label (next);
+	}
+      if (load)
+	emit_move_insn (data, slot);
+    }
+  if (load)
+    emit_move_insn (operands[0], data);
+  DONE;
+})
+
+;; Intel 327364-001 VPMINSD/VPMAXSD/VPMINUD/VPMAXUD pp.497-506.  k1om has no
+;; 64-bit forms, so V8DI min/max stay off.
+(define_insn "*knc_<code>v16si3"
+  [(set (match_operand:V16SI 0 "register_operand" "=YJ")
+	(maxmin:V16SI
+	  (match_operand:V16SI 1 "register_operand" "%YJ")
+	  (match_operand:V16SI 2 "vector_operand" "YJBm")))]
+  "TARGET_KNC"
+  "vp<maxmin_int>d\t%g2, %g1, %g0"
+  [(set_attr "type" "sseiadd")
+   (set_attr "mode" "XI")])
+
+;; Expander-only copy of sse.md's VFH for cond_<insn><mode> (ADR-0007
+;; point 2); the insns keep VFH.  ix86_knc_packed_mode_p limits KNC to the
+;; 64-bit packed modes.
+(define_mode_iterator VFH_KNC
+  [(V32HF "TARGET_AVX512FP16")
+   (V16HF "TARGET_AVX512FP16 && TARGET_AVX512VL")
+   (V8HF "TARGET_AVX512FP16 && TARGET_AVX512VL")
+   (V16SF "TARGET_AVX512F || ix86_knc_packed_mode_p (V16SFmode)")
+   (V8SF "TARGET_AVX") V4SF
+   (V8DF "TARGET_AVX512F || ix86_knc_packed_mode_p (V8DFmode)")
+   (V4DF "TARGET_AVX")
+   (V2DF "TARGET_SSE2")])
+
+;; Masked arithmetic (ADR-0007 point 3): lanes with a clear mask bit keep
+;; operand 3 and raise no exception (Intel 327364-001 2.1.2, p.22).  The
+;; shared cond_<insn><mode> expander emits this through <insn><mode>3_mask.
+(define_insn "*knc_<knc_fp_binary><mode>3_mask"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
+	(vec_merge:KNC_FP
+	  (KNC_FP_BINARY:KNC_FP
+	    (match_operand:KNC_FP 1 "register_operand" "YJ")
+	    (match_operand:KNC_FP 2 "vector_operand" "YJBm"))
+	  (match_operand:KNC_FP 3 "nonimm_or_0_operand" "0")
+	  (match_operand:<knc_maskmode> 4 "register_operand" "YL")))]
+  "TARGET_KNC"
+  "v<knc_fp_binary><knc_fp_suffix>\t{%g2, %g1, %g0%{%4%}|%g0%{%4%}, %g1, %g2}"
+  [(set_attr "type" "<knc_fp_type>")
+   (set_attr "mode" "<MODE>")])

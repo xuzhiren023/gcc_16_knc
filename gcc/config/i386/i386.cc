@@ -26799,6 +26799,11 @@ ix86_vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
     }
   if (stmt_cost == -1)
     stmt_cost = ix86_default_vector_cost (kind, mode);
+  /* ADR-0007 point 7: KNC masked accesses are 64-byte aligned only.  */
+  if (TARGET_KNC && ix86_knc_packed_mode_p (mode)
+      && (kind == unaligned_load || kind == unaligned_store)
+      && stmt_info && gimple_call_internal_p (stmt_info->stmt))
+    stmt_cost *= 1000;
 
   if (kind == vec_perm && vectype
       && GET_MODE_SIZE (TYPE_MODE (vectype)) == 32
