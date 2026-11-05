@@ -1193,3 +1193,42 @@ ix86_knc_division_cost (const struct processor_costs *cost)
   /* Fast path count; constants and transfers have their own RTL costs. */
   return 27 * cost->sse_op;
 }
+
+/* IMCI widens only lanes 0-7 (Intel 327364-001 pp.154, 184, 187).
+   Keep all register temporaries full width; V8SF/V8SI occur only in selects.  */
+void
+ix86_knc_expand_unpack (enum rtx_code code, rtx *ops, bool high)
+{
+  machine_mode mode = GET_MODE (ops[1]);
+  rtx src = force_reg (mode, ops[1]);
+  if (high)
+    {
+      rtx tmp = gen_reg_rtx (mode);
+      emit_insn (gen_knc_permf32x4 (mode, tmp, src, GEN_INT (0xee)));
+      src = tmp;
+    }
+  rtvec lanes = rtvec_alloc (8);
+  for (int i = 0; i < 8; ++i)
+    RTVEC_ELT (lanes, i) = GEN_INT (i);
+  rtx low = gen_rtx_VEC_SELECT (mode == V16SFmode ? V8SFmode : V8SImode,
+                                src, gen_rtx_PARALLEL (VOIDmode, lanes));
+  emit_insn (gen_rtx_SET (ops[0], gen_rtx_fmt_e (code, V8DFmode, low)));
+}
+
+/* Each narrowing form zeros lanes 8-15 (pp.162, 166, 181).  Both the
+   conversions and the mask materialization remain visible to optimization.  */
+void
+ix86_knc_expand_pack (enum rtx_code code, rtx *ops)
+{
+  machine_mode mode = GET_MODE (ops[0]);
+  rtx lo = gen_reg_rtx (mode), hi = gen_reg_rtx (mode);
+  rtx (*convert) (rtx, rtx, rtx) = code == FLOAT_TRUNCATE
+    ? gen_knc_cvtpd2ps_lo : code == FIX
+    ? gen_knc_cvtpd2dq_lo : gen_knc_cvtpd2udq_lo;
+  rtx zero = CONST0_RTX (mode == V16SFmode ? V8SFmode : V8SImode);
+  emit_insn (convert (lo, force_reg (V8DFmode, ops[1]), zero));
+  emit_insn (convert (hi, force_reg (V8DFmode, ops[2]), zero));
+  rtx mask = gen_reg_rtx (HImode);
+  emit_insn (gen_knc_mask (mask, force_reg (HImode, GEN_INT (-256))));
+  emit_insn (gen_knc_cvt_merge (mode, ops[0], hi, GEN_INT (0x44), lo, mask));
+}
