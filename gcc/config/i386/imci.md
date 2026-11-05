@@ -1251,6 +1251,7 @@
 ;; S5-10, Intel 327364-001 pp.157-179, 197-198, 221-222, 316, 324,
 ;; 588-592.  Each UNSPEC is one register instruction: its rounding/SAE
 ;; semantics differ from ordinary arithmetic.  Keep all operands visible.
+;; KNC gas 2.22 requires SAE before the immediate in AT&T syntax.
 (define_c_enum "unspec"
   [UNSPEC_KNC_SQRT_MANT UNSPEC_KNC_SQRT_EXP UNSPEC_KNC_SQRT_CVT
    UNSPEC_KNC_SQRT_RSQRT UNSPEC_KNC_SQRT_MUL UNSPEC_KNC_SQRT_FMA
@@ -1262,7 +1263,7 @@
         (unspec:V16SF [(match_operand:V16SF 1 "register_operand" "YJ")]
                        UNSPEC_KNC_SQRT_MANT))]
   "TARGET_KNC"
-  "vgetmantps\t{$5, %{sae%}, %g1, %g0|%g0, %g1, %{sae%}, 5}"
+  "vgetmantps\t{%{sae%}, $5, %g1, %g0|%g0, %g1, 5, %{sae%}}"
   [(set_attr "type" "sse") (set_attr "mode" "V16SF")])
 
 (define_insn "knc_sqrt_exp"
@@ -1278,7 +1279,7 @@
         (unspec:V16SI [(match_operand:V16SF 1 "register_operand" "YJ")]
                        UNSPEC_KNC_SQRT_CVT))]
   "TARGET_KNC"
-  "vcvtfxpntps2dq\t{$0, %{sae%}, %g1, %g0|%g0, %g1, %{sae%}, 0}"
+  "vcvtfxpntps2dq\t{%{sae%}, $0, %g1, %g0|%g0, %g1, 0, %{sae%}}"
   [(set_attr "type" "ssecvt") (set_attr "mode" "V16SF")])
 
 (define_insn "knc_sqrt_rsqrt"
