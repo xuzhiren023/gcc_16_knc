@@ -647,7 +647,7 @@
 ;; of operand 1.  Only those four index bits are read, so a rotation index
 ;; needs no AND.  The 8-lane modes rotate by dword pairs.
 (define_c_enum "unspec" [UNSPEC_KNC_PERMVAR])
-(define_insn "knc_permvar<mode>"
+(define_insn "@knc_permvar<mode>"
   [(set (match_operand:KNC_PACKED 0 "register_operand" "=YJ")
 	(unspec:KNC_PACKED
 	  [(match_operand:KNC_PACKED 1 "register_operand" "YJ")
@@ -656,6 +656,99 @@
   "TARGET_KNC"
   "vpermd\t{%g1, %g2, %g0|%g0, %g2, %g1}"
   [(set_attr "type" "sselog1")
+   (set_attr "mode" "XI")])
+
+;; Constant permutes (S5-06, ADR-0008 point 1), emitted only by
+;; ix86_knc_vectorize_vec_perm_const.  Each immediate is computed on the
+;; dword view of the selector, so one insn serves all four modes.
+;; Lanes with a clear bit in operand 4 keep operand 3 ("retain their
+;; previous values", VPERMD p.480); the 8-lane modes use this on their
+;; V16SI lowpart, with a dword-pair mask.
+(define_insn "knc_permvarv16si_mask"
+  [(set (match_operand:V16SI 0 "register_operand" "=YJ")
+	(vec_merge:V16SI
+	  (unspec:V16SI
+	    [(match_operand:V16SI 1 "register_operand" "YJ")
+	     (match_operand:V16SI 2 "register_operand" "YJ")]
+	    UNSPEC_KNC_PERMVAR)
+	  (match_operand:V16SI 3 "register_operand" "0")
+	  (match_operand:HI 4 "register_operand" "YL")))]
+  "TARGET_KNC"
+  "vpermd\t{%g1, %g2, %g0%{%4%}|%g0%{%4%}, %g2, %g1}"
+  [(set_attr "type" "sselog1")
+   (set_attr "mode" "XI")])
+
+(define_c_enum "unspec"
+  [UNSPEC_KNC_SWIZZLE UNSPEC_KNC_PERMF32X4 UNSPEC_KNC_PSHUFD
+   UNSPEC_KNC_VALIGND])
+
+;; A register swizzle on a plain move (Intel 327364-001 tables 2.2 and 2.3,
+;; p.29-30).  Operand 2 is the swizzle field (1-7) of a 32-bit swizzle,
+;; which repeats in every 128-bit block, plus 8 for a 64-bit swizzle,
+;; which repeats in every 256-bit block.  The integer moves do no FP
+;; arithmetic, and they carry no rounding override: EH=1 would reuse the
+;; swizzle bits (p.28).
+(define_insn "@knc_swizzle<mode>"
+  [(set (match_operand:KNC_PACKED 0 "register_operand" "=YJ")
+	(unspec:KNC_PACKED
+	  [(match_operand:KNC_PACKED 1 "register_operand" "YJ")
+	   (match_operand:SI 2 "const_0_to_15_operand")]
+	  UNSPEC_KNC_SWIZZLE))]
+  "TARGET_KNC && (INTVAL (operands[2]) & 7) != 0"
+{
+  static const char *const names[8]
+    = { "dcba", "cdab", "badc", "dacb", "aaaa", "bbbb", "cccc", "dddd" };
+  static char buf[80];
+  const char *name = names[INTVAL (operands[2]) & 7];
+  snprintf (buf, sizeof buf,
+	    "vmovdqa%d\t{%%g1%%{%s%%}, %%g0|%%g0, %%g1%%{%s%%}}",
+	    INTVAL (operands[2]) & 8 ? 64 : 32, name, name);
+  return buf;
+}
+  [(set_attr "type" "sselog1")
+   (set_attr "mode" "XI")])
+
+;; VPERMF32X4 p.482: 128-bit block N of the result is block
+;; (operand 2 >> 2N) & 3 of operand 1.
+(define_insn "@knc_permf32x4<mode>"
+  [(set (match_operand:KNC_PACKED 0 "register_operand" "=YJ")
+	(unspec:KNC_PACKED
+	  [(match_operand:KNC_PACKED 1 "register_operand" "YJ")
+	   (match_operand:SI 2 "const_0_to_255_operand")]
+	  UNSPEC_KNC_PERMF32X4))]
+  "TARGET_KNC"
+  "vpermf32x4\t{%2, %g1, %g0|%g0, %g1, %2}"
+  [(set_attr "type" "sselog1")
+   (set_attr "length_immediate" "1")
+   (set_attr "mode" "XI")])
+
+;; VPSHUFD p.536: dword J of every 128-bit block is dword
+;; (operand 2 >> 2J) & 3 of the same block of operand 1.
+(define_insn "@knc_pshufd<mode>"
+  [(set (match_operand:KNC_PACKED 0 "register_operand" "=YJ")
+	(unspec:KNC_PACKED
+	  [(match_operand:KNC_PACKED 1 "register_operand" "YJ")
+	   (match_operand:SI 2 "const_0_to_255_operand")]
+	  UNSPEC_KNC_PSHUFD))]
+  "TARGET_KNC"
+  "vpshufd\t{%2, %g1, %g0|%g0, %g1, %2}"
+  [(set_attr "type" "sselog1")
+   (set_attr "length_immediate" "1")
+   (set_attr "mode" "XI")])
+
+;; VALIGND p.124: the result is dwords operand 3 to operand 3 + 15 of the
+;; 32-dword concatenation with operand 2 low and operand 1 high.
+(define_insn "@knc_valignd<mode>"
+  [(set (match_operand:KNC_PACKED 0 "register_operand" "=YJ")
+	(unspec:KNC_PACKED
+	  [(match_operand:KNC_PACKED 1 "register_operand" "YJ")
+	   (match_operand:KNC_PACKED 2 "register_operand" "YJ")
+	   (match_operand:SI 3 "const_0_to_15_operand")]
+	  UNSPEC_KNC_VALIGND))]
+  "TARGET_KNC"
+  "valignd\t{%3, %g2, %g1, %g0|%g0, %g1, %g2, %3}"
+  [(set_attr "type" "sselog1")
+   (set_attr "length_immediate" "1")
    (set_attr "mode" "XI")])
 
 ;; maskload (operand 1 is memory, else value zero) and maskstore (operand 0
