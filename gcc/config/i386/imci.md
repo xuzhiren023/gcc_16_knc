@@ -153,22 +153,6 @@
   "vcvtfxpntpd2udq\t{$3, %g1, %g0|%g0, %g1, 3}"
   [(set_attr "type" "ssecvt") (set_attr "mode" "XI")])
 
-;; The narrowing instructions zero their entire high half, even masked.
-;; Merge the second low half into the first using the S5-06 block permutation.
-(define_mode_iterator KNC_CVT_PACK [V16SF V16SI])
-(define_insn "@knc_cvt_merge<mode>"
-  [(set (match_operand:KNC_CVT_PACK 0 "register_operand" "=YJ")
-        (vec_merge:KNC_CVT_PACK
-          (unspec:KNC_CVT_PACK
-            [(match_operand:KNC_CVT_PACK 1 "register_operand" "YJ")
-             (match_operand:SI 2 "const_0_to_255_operand")]
-            UNSPEC_KNC_PERMF32X4)
-          (match_operand:KNC_CVT_PACK 3 "register_operand" "0")
-          (match_operand:HI 4 "register_operand" "YL")))]
-  "TARGET_KNC"
-  "vpermf32x4\t{%2, %g1, %g0%{%4%}|%g0%{%4%}, %g1, %2}"
-  [(set_attr "type" "sselog1") (set_attr "mode" "XI")])
-
 (define_mode_iterator KNC_SCALAR [SF DF SI DI TI TF])
 (define_mode_iterator KNC_BROADCAST [SF DF SI DI])
 (define_mode_iterator KNC_PAIR [TI TF])
@@ -843,6 +827,22 @@
   [(set_attr "type" "sselog1")
    (set_attr "length_immediate" "1")
    (set_attr "mode" "XI")])
+
+;; The narrowing instructions zero their entire high half, even masked.
+;; Merge the second low half into the first using the S5-06 block permutation.
+(define_mode_iterator KNC_CVT_PACK [V16SF V16SI])
+(define_insn "@knc_cvt_merge<mode>"
+  [(set (match_operand:KNC_CVT_PACK 0 "register_operand" "=YJ")
+        (vec_merge:KNC_CVT_PACK
+          (unspec:KNC_CVT_PACK
+            [(match_operand:KNC_CVT_PACK 1 "register_operand" "YJ")
+             (match_operand:SI 2 "const_0_to_255_operand")]
+            UNSPEC_KNC_PERMF32X4)
+          (match_operand:KNC_CVT_PACK 3 "register_operand" "0")
+          (match_operand:HI 4 "register_operand" "YL")))]
+  "TARGET_KNC"
+  "vpermf32x4\t{%2, %g1, %g0%{%4%}|%g0%{%4%}, %g1, %2}"
+  [(set_attr "type" "sselog1") (set_attr "mode" "XI")])
 
 ;; VPSHUFD p.536: dword J of every 128-bit block is dword
 ;; (operand 2 >> 2J) & 3 of the same block of operand 1.
