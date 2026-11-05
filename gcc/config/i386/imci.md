@@ -28,13 +28,14 @@
 ;; integer add/sub, mul and logic expanders (ADR-0006 point 4, ADR-0007
 ;; point 2).  The sse.md insns keep the original iterators.  Each expander
 ;; condition also tests ix86_knc_packed_mode_p, so the KNC modes enabled
-;; here are exactly those with a "|| TARGET_KNC" entry.  V8DI add and sub
-;; stay off: k1om has no vpaddq or vpsubq (S4-04 adds the carry sequence).
+;; here are exactly those with a "|| TARGET_KNC" entry.  The add/sub
+;; expander sends KNC to @knc_plusminus<insn><mode> on entry (ADR-0006
+;; rule 2), and V8DI uses the carry sequence there (ADR-0007 point 6).
 (define_mode_iterator VI_AVX2_KNC
   [(V64QI "TARGET_AVX512BW") (V32QI "TARGET_AVX2") V16QI
    (V32HI "TARGET_AVX512BW") (V16HI "TARGET_AVX2") V8HI
    (V16SI "TARGET_AVX512F || TARGET_KNC") (V8SI "TARGET_AVX2") V4SI
-   (V8DI "TARGET_AVX512F") (V4DI "TARGET_AVX2") V2DI])
+   (V8DI "TARGET_AVX512F || TARGET_KNC") (V4DI "TARGET_AVX2") V2DI])
 
 (define_mode_iterator VI4_AVX512F_KNC
   [(V16SI "TARGET_AVX512F || TARGET_KNC") (V8SI "TARGET_AVX2") V4SI])
@@ -743,3 +744,134 @@
   "v<knc_fp_binary><knc_fp_suffix>\t{%g2, %g1, %g0%{%4%}|%g0%{%4%}, %g1, %g2}"
   [(set_attr "type" "<knc_fp_type>")
    (set_attr "mode" "<MODE>")])
+
+;; Integer add and sub (ADR-0007 point 6).  sse.md's <insn><mode>3 calls
+;; this on entry under KNC, so upstream changes to that body (constant
+;; operands, the +1 to -1 rewrite) never reach KNC.  Constants go to
+;; registers (ix86_knc_fixup_binary_operands).  V16SI is vpaddd/vpsubd.
+(define_mode_iterator KNC_ADDSUB [V16SI V8DI])
+(define_expand "@knc_plusminus<insn><mode>"
+  [(set (match_operand:KNC_ADDSUB 0 "register_operand")
+	(plusminus:KNC_ADDSUB
+	  (match_operand:KNC_ADDSUB 1 "register_operand")
+	  (match_operand:KNC_ADDSUB 2 "vector_operand")))]
+  "TARGET_KNC"
+{
+  ix86_knc_fixup_binary_operands (<MODE>mode, operands);
+  if (<MODE>mode == V8DImode)
+    {
+      /* The mask and zero are ordinary moves, so loop invariant motion
+	 hoists them; the carry sequence splits before reload.  */
+      rtx kodd = force_reg (HImode, gen_int_mode (0xaaaa, HImode));
+      rtx zero = force_reg (V16SImode, CONST0_RTX (V16SImode));
+      operands[2] = force_reg (V8DImode, operands[2]);
+      emit_insn (gen_knc_<insn>v8di3_carry (operands[0], operands[1],
+					    operands[2], kodd, zero));
+      DONE;
+    }
+})
+
+;; k1om has no vpaddq or vpsubq.  Qword j is dword 2j (low) and 2j+1
+;; (high).  Register swizzle {cdab} swaps the dwords of each qword (Intel
+;; 327364-001 table 2.2, p.29).  For add (sub uses the borrow forms):
+;;   vmovdqa32  t, a{cdab}         t[2j+1] = a.lo (p.382)
+;;   vpaddsetcd t, kc, b{cdab}     kc[2j+1] = carry (a.lo + b.lo) (p.435)
+;;   vpaddd     r, a, b            both halves, no carry (p.432)
+;;   vpadcd     r{kodd}, kc, zero  r.hi += kc[2j+1] (p.429)
+;; vpaddsetcd has no write mask, so kc is fully defined.  A carry stays in
+;; its own lane's bit.  VPSUBSETBD p.565, VPSUBD p.556, VPSBBD p.524.
+(define_c_enum "unspec" [UNSPEC_KNC_CARRY UNSPEC_KNC_CARRY_IN])
+(define_code_attr knc_carry_out [(plus "vpaddsetcd") (minus "vpsubsetbd")])
+(define_code_attr knc_carry_in [(plus "vpadcd") (minus "vpsbbd")])
+
+(define_insn "knc_swap_pairsv16si"
+  [(set (match_operand:V16SI 0 "register_operand" "=YJ")
+	(vec_select:V16SI
+	  (match_operand:V16SI 1 "register_operand" "YJ")
+	  (parallel [(const_int 1) (const_int 0) (const_int 3) (const_int 2)
+		     (const_int 5) (const_int 4) (const_int 7) (const_int 6)
+		     (const_int 9) (const_int 8) (const_int 11) (const_int 10)
+		     (const_int 13) (const_int 12) (const_int 15) (const_int 14)])))]
+  "TARGET_KNC"
+  "vmovdqa32\t{%g1%{cdab%}, %g0|%g0, %g1%{cdab%}}"
+  [(set_attr "type" "sselog1")
+   (set_attr "mode" "XI")])
+
+;; Operand 1 is the carry (borrow) out of each lane of the sum.
+(define_insn "knc_<insn>_carry_outv16si"
+  [(set (match_operand:V16SI 0 "register_operand" "=YJ")
+	(plusminus:V16SI
+	  (match_operand:V16SI 2 "register_operand" "0")
+	  (vec_select:V16SI
+	    (match_operand:V16SI 3 "register_operand" "YJ")
+	    (parallel [(const_int 1) (const_int 0) (const_int 3) (const_int 2)
+		       (const_int 5) (const_int 4) (const_int 7) (const_int 6)
+		       (const_int 9) (const_int 8) (const_int 11) (const_int 10)
+		       (const_int 13) (const_int 12) (const_int 15) (const_int 14)]))))
+   (set (match_operand:HI 1 "register_operand" "=YK")
+	(unspec:HI
+	  [(plusminus:V16SI
+	     (match_dup 2)
+	     (vec_select:V16SI
+	       (match_dup 3)
+	       (parallel [(const_int 1) (const_int 0) (const_int 3) (const_int 2)
+			 (const_int 5) (const_int 4) (const_int 7) (const_int 6)
+			 (const_int 9) (const_int 8) (const_int 11) (const_int 10)
+			 (const_int 13) (const_int 12) (const_int 15) (const_int 14)])))]
+	  UNSPEC_KNC_CARRY))]
+  "TARGET_KNC"
+  "<knc_carry_out>\t{%g3%{cdab%}, %1, %g0|%g0, %1, %g3%{cdab%}}"
+  [(set_attr "type" "sseiadd")
+   (set_attr "mode" "XI")])
+
+;; Lanes set in operand 5 take operand 2 +/- operand 4 +/- operand 3's bit
+;; and write their carry (borrow) back into that bit; the others keep both.
+(define_insn "knc_<insn>_carry_inv16si"
+  [(set (match_operand:V16SI 0 "register_operand" "=YJ")
+	(vec_merge:V16SI
+	  (unspec:V16SI
+	    [(plusminus:V16SI
+	       (match_operand:V16SI 2 "register_operand" "0")
+	       (match_operand:V16SI 4 "register_operand" "YJ"))
+	     (match_operand:HI 3 "register_operand" "1")]
+	    UNSPEC_KNC_CARRY_IN)
+	  (match_dup 2)
+	  (match_operand:HI 5 "register_operand" "YL")))
+   (set (match_operand:HI 1 "register_operand" "=YK")
+	(unspec:HI [(match_dup 2) (match_dup 4) (match_dup 3) (match_dup 5)]
+		   UNSPEC_KNC_CARRY_IN))]
+  "TARGET_KNC"
+  "<knc_carry_in>\t{%g4, %1, %g0%{%5%}|%g0%{%5%}, %1, %g4}"
+  [(set_attr "type" "sseiadd")
+   (set_attr "mode" "XI")])
+
+;; Operand 3 is kodd (0xaaaa) and operand 4 a zero vector, both set up by
+;; the expander outside the loop.  The temporaries are new pseudos.
+(define_insn_and_split "knc_<insn>v8di3_carry"
+  [(set (match_operand:V8DI 0 "register_operand")
+	(plusminus:V8DI
+	  (match_operand:V8DI 1 "register_operand")
+	  (match_operand:V8DI 2 "register_operand")))
+   (use (match_operand:HI 3 "register_operand"))
+   (use (match_operand:V16SI 4 "register_operand"))]
+  "TARGET_KNC && ix86_pre_reload_split ()"
+  "#"
+  "&& 1"
+  [(const_int 0)]
+{
+  rtx a = gen_lowpart (V16SImode, operands[1]);
+  rtx b = gen_lowpart (V16SImode, operands[2]);
+  rtx t = gen_reg_rtx (V16SImode);
+  rtx low = gen_reg_rtx (V16SImode);
+  rtx carry = gen_reg_rtx (HImode);
+  rtx r = gen_reg_rtx (V16SImode);
+  rtx result = gen_reg_rtx (V16SImode);
+  rtx spent = gen_reg_rtx (HImode);
+  emit_insn (gen_knc_swap_pairsv16si (t, a));
+  emit_insn (gen_knc_<insn>_carry_outv16si (low, carry, t, b));
+  emit_insn (gen_rtx_SET (r, gen_rtx_<CODE> (V16SImode, a, b)));
+  emit_insn (gen_knc_<insn>_carry_inv16si (result, spent, r, carry,
+					   operands[4], operands[3]));
+  emit_move_insn (operands[0], gen_lowpart (V8DImode, result));
+  DONE;
+})
