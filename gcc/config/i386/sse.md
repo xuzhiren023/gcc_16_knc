@@ -9175,7 +9175,7 @@
   [(set (match_operand:V16SI 0 "register_operand" "=v")
 	(any_fix:V16SI
 	  (match_operand:V16SF 1 "<round_saeonly_nimm_predicate>" "<round_saeonly_constraint>")))]
-  "TARGET_AVX512F || (TARGET_KNC && V16SFmode == GET_MODE (operands[1]))"
+  "TARGET_AVX512F || (TARGET_KNC && ix86_knc_packed_mode_p (V16SFmode))"
   "vcvttps2<fixsuffix>dq\t{<round_saeonly_mask_op2>%1, %0<mask_operand2>|%0<mask_operand2>, %1<round_saeonly_mask_op2>}"
   [(set_attr "type" "ssecvt")
    (set_attr "prefix" "evex")
