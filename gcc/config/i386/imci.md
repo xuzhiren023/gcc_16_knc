@@ -520,10 +520,15 @@
 ;; Under KNC it refuses the quiet UNLT, UNLE, UNGT, UNGE, UNEQ and LTGT:
 ;; they need a guarded compare that the card has not cleared yet (point 5),
 ;; so can_vec_cmp_compare_p reports no support and those loops stay scalar.
+;; With -fno-trapping-math no flag is observable, so UNLT..UNGE are the
+;; signaling nle/nlt.  match.pd folds ~(a < b) into a u>= b there without
+;; asking the target (S4-03: cond_add exposed it as an ICE in expand).
 ;; Any other target keeps the expander's former "" (any comparison).
 (define_special_predicate "knc_vec_cmp_operator"
   (ior (not (match_test "TARGET_KNC"))
-       (match_code "eq,ne,lt,le,gt,ge,ltu,leu,gtu,geu,unordered,ordered")))
+       (match_code "eq,ne,lt,le,gt,ge,ltu,leu,gtu,geu,unordered,ordered")
+       (and (match_code "unlt,unle,ungt,unge")
+	    (match_test "!flag_trapping_math"))))
 
 ;; k1om has no vpcmpq, so V8DI compares stay off (point 6).
 (define_mode_iterator KNC_CMP [V16SF V8DF V16SI])
