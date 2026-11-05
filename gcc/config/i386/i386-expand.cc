@@ -25381,6 +25381,9 @@ ix86_vectorize_vec_perm_const (machine_mode vmode, machine_mode op_mode,
 			       rtx target, rtx op0, rtx op1,
 			       const vec_perm_indices &sel)
 {
+  if (TARGET_KNC)
+    return ix86_knc_vectorize_vec_perm_const (vmode, op_mode, target, op0,
+					      op1, sel);
   if (vmode != op_mode)
     return false;
 

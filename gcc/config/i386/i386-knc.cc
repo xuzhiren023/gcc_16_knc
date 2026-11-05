@@ -583,3 +583,246 @@ ix86_knc_expand_mask_vec_cmp (rtx dest, enum rtx_code code, rtx op0, rtx op1)
   emit_insn (gen_rtx_SET (dest, cmp));
   return true;
 }
+
+/* S5-06, ADR-0008 point 1: the register swizzles of Intel 327364-001
+   tables 2.2 and 2.3 (p.29-30) as the source lane of lanes 0-3 of each
+   group, in the order of the swizzle field: {dcba} {cdab} {badc} {dacb}
+   {aaaa} {bbbb} {cccc} {dddd}.  */
+static const unsigned char knc_swizzle_lanes[8][4]
+  = { { 0, 1, 2, 3 }, { 1, 0, 3, 2 }, { 2, 3, 0, 1 }, { 1, 2, 0, 3 },
+      { 0, 0, 0, 0 }, { 1, 1, 1, 1 }, { 2, 2, 2, 2 }, { 3, 3, 3, 3 } };
+
+/* Operand 2 of knc_swizzle<mode> for the one-input dword selector D, or
+   -1.  A 32-bit swizzle repeats in every 128-bit block and a 64-bit one
+   (operand + 8) in every 256-bit block.  QWORDS_FIRST tries 64-bit first,
+   so that 8-lane data is swizzled in its own element size.  */
+static int
+knc_swizzle_code (const unsigned char *d, bool qwords_first)
+{
+  for (int pass = 0; pass < 2; ++pass)
+    {
+      bool qwords = (pass == 0) == qwords_first;
+      for (int s = 1; s < 8; ++s)
+	{
+	  bool ok = true;
+	  for (unsigned int i = 0; i < 16 && ok; ++i)
+	    {
+	      unsigned int want;
+	      if (qwords)
+		{
+		  unsigned int q = i / 2;
+		  want = 2 * ((q & ~3U) + knc_swizzle_lanes[s][q & 3]) + (i & 1);
+		}
+	      else
+		want = (i & ~3U) + knc_swizzle_lanes[s][i & 3];
+	      ok = d[i] == want;
+	    }
+	  if (ok)
+	    return qwords ? s + 8 : s;
+	}
+    }
+  return -1;
+}
+
+/* The vpermf32x4 immediate (p.482) for D, or -1: whole 128-bit blocks.  */
+static int
+knc_permf32x4_imm (const unsigned char *d)
+{
+  int imm = 0;
+  for (unsigned int b = 0; b < 4; ++b)
+    {
+      if (d[4 * b] % 4 != 0)
+	return -1;
+      for (unsigned int j = 1; j < 4; ++j)
+	if (d[4 * b + j] != d[4 * b] + j)
+	  return -1;
+      imm |= (d[4 * b] / 4) << (2 * b);
+    }
+  return imm;
+}
+
+/* The vpshufd immediate (p.536) for D, or -1: one permutation within
+   every 128-bit block.  */
+static int
+knc_pshufd_imm (const unsigned char *d)
+{
+  int imm = 0;
+  for (unsigned int j = 0; j < 4; ++j)
+    {
+      if (d[j] >= 4)
+	return -1;
+      for (unsigned int b = 1; b < 4; ++b)
+	if (d[4 * b + j] != 4 * b + d[j])
+	  return -1;
+      imm |= d[j] << (2 * j);
+    }
+  return imm;
+}
+
+/* The valignd shift K (p.124) when D[I] is (K + I) & MASK for every I,
+   else 0.  MASK is 15 for a one-input rotation and 31 for two inputs,
+   where K + I never exceeds 30.  */
+static int
+knc_valignd_shift (const unsigned char *d, unsigned int mask)
+{
+  unsigned int k = d[0];
+  if (k == 0 || k >= 16)
+    return 0;
+  for (unsigned int i = 1; i < 16; ++i)
+    if (d[i] != ((k + i) & mask))
+      return 0;
+  return k;
+}
+
+/* A register holding the vpermd index for D.  VPERMD reads index bits
+   3:0 only (p.480), so the 8-lane modes use dword pairs, which D already
+   is.  The constant is an ordinary move, so it is hoisted out of loops.  */
+static rtx
+knc_perm_index (const unsigned char *d)
+{
+  rtvec v = rtvec_alloc (16);
+  for (unsigned int i = 0; i < 16; ++i)
+    RTVEC_ELT (v, i) = GEN_INT (d[i] & 15);
+  return force_reg (V16SImode, gen_rtx_CONST_VECTOR (V16SImode, v));
+}
+
+/* TARGET_VECTORIZE_VEC_PERM_CONST for KNC (ADR-0008 point 1), reached
+   from the entry of ix86_vectorize_vec_perm_const, so no AVX-512 helper
+   runs.  The selector is viewed as 16 dwords and the cheapest form is
+   taken: a move, a register swizzle, vpermf32x4, vpshufd, valignd, a
+   blend, one vpermd, or vpermd plus a write-masked vpermd.  The last
+   takes any two inputs, so every selector is supported and testing
+   always succeeds, as the expansion does.  */
+bool
+ix86_knc_vectorize_vec_perm_const (machine_mode vmode, machine_mode op_mode,
+				   rtx target, rtx op0, rtx op1,
+				   const vec_perm_indices &sel)
+{
+  if (vmode != op_mode || !ix86_knc_packed_mode_p (vmode))
+    return false;
+  if (!target)
+    return true;
+
+  unsigned int nelt = GET_MODE_NUNITS (vmode);
+  unsigned int per = 16 / nelt;
+  gcc_assert (sel.length () == nelt);
+  unsigned char e[16], d[16];
+  bool same = rtx_equal_p (op0, op1);
+  bool from0 = false, from1 = false;
+  for (unsigned int i = 0; i < nelt; ++i)
+    {
+      e[i] = sel[i].to_constant () % (same ? nelt : 2 * nelt);
+      from0 |= e[i] < nelt;
+      from1 |= e[i] >= nelt;
+    }
+  if (!from0)
+    {
+      std::swap (op0, op1);
+      for (unsigned int i = 0; i < nelt; ++i)
+	e[i] -= nelt;
+      from1 = false;
+    }
+  for (unsigned int i = 0; i < 16; ++i)
+    d[i] = e[i / per] * per + i % per;
+
+  rtx dest = register_operand (target, vmode) ? target : gen_reg_rtx (vmode);
+  op0 = force_reg (vmode, op0);
+  int imm;
+  if (!from1)
+    {
+      bool identity = true;
+      for (unsigned int i = 0; i < 16; ++i)
+	identity &= d[i] == i;
+      if (identity)
+	emit_move_insn (dest, op0);
+      else if ((imm = knc_swizzle_code (d, nelt == 8)) >= 0)
+	emit_insn (gen_knc_swizzle (vmode, dest, op0, GEN_INT (imm)));
+      else if ((imm = knc_permf32x4_imm (d)) >= 0)
+	emit_insn (gen_knc_permf32x4 (vmode, dest, op0, GEN_INT (imm)));
+      else if ((imm = knc_pshufd_imm (d)) >= 0)
+	emit_insn (gen_knc_pshufd (vmode, dest, op0, GEN_INT (imm)));
+      else if ((imm = knc_valignd_shift (d, 15)) > 0)
+	emit_insn (gen_knc_valignd (vmode, dest, op0, op0, GEN_INT (imm)));
+      else
+	emit_insn (gen_knc_permvar (vmode, dest, op0, knc_perm_index (d)));
+    }
+  else
+    {
+      op1 = force_reg (vmode, op1);
+      unsigned char swapped[16];
+      bool blend = true;
+      unsigned int lanes = 0, dwords = 0;
+      for (unsigned int i = 0; i < 16; ++i)
+	{
+	  swapped[i] = d[i] ^ 16;
+	  dwords |= (unsigned int) (d[i] >= 16) << i;
+	}
+      for (unsigned int i = 0; i < nelt; ++i)
+	{
+	  blend &= e[i] % nelt == i;
+	  lanes |= (unsigned int) (e[i] >= nelt) << i;
+	}
+      if ((imm = knc_valignd_shift (d, 31)) > 0)
+	emit_insn (gen_knc_valignd (vmode, dest, op1, op0, GEN_INT (imm)));
+      else if ((imm = knc_valignd_shift (swapped, 31)) > 0)
+	emit_insn (gen_knc_valignd (vmode, dest, op0, op1, GEN_INT (imm)));
+      else if (blend)
+	{
+	  /* vblendm (imci.md *knc_blend): lanes set in the mask take op1.  */
+	  machine_mode mmode = nelt == 16 ? HImode : QImode;
+	  rtx mask = force_reg (mmode, gen_int_mode (lanes, mmode));
+	  emit_insn (gen_rtx_SET (dest, gen_rtx_VEC_MERGE (vmode, op1, op0,
+							   mask)));
+	}
+      else
+	{
+	  /* Index D mod 16 on both inputs; the second vpermd writes only
+	     the dwords that come from op1.  */
+	  rtx index = knc_perm_index (d);
+	  rtx mask = force_reg (HImode, gen_int_mode (dwords, HImode));
+	  rtx low = gen_reg_rtx (V16SImode);
+	  rtx result = gen_reg_rtx (V16SImode);
+	  emit_insn (gen_knc_permvarv16si (low, gen_lowpart (V16SImode, op0),
+					   index));
+	  emit_insn (gen_knc_permvarv16si_mask (result,
+						gen_lowpart (V16SImode, op1),
+						index, low, mask));
+	  emit_move_insn (dest, gen_lowpart (vmode, result));
+	}
+    }
+  if (dest != target)
+    emit_move_insn (target, dest);
+  return true;
+}
+
+/* ADR-0008 point 1, for ix86_vector_costs::add_stmt_cost: whether a
+   vec_perm on MODE for STMT_INFO and NODE needs two inputs per result
+   vector, which costs vpermd plus a masked vpermd.  That holds for an SLP
+   lane permutation that merges children (unless every lane stays in
+   place, which is one blend) or keeps fewer lanes than its one child has,
+   and for a grouped access whose node uses only part of the group, or
+   whose group does not divide the vector.  A reversal, or a swap within
+   each group, stays one-input.  */
+bool
+ix86_knc_two_input_perm_p (machine_mode mode, stmt_vec_info stmt_info,
+			   slp_tree node)
+{
+  if (!ix86_knc_packed_mode_p (mode) || !node)
+    return false;
+  if (SLP_TREE_PERMUTE_P (node))
+    {
+      if (SLP_TREE_CHILDREN (node).length () == 1)
+	return (SLP_TREE_LANES (node)
+		< SLP_TREE_LANES (SLP_TREE_CHILDREN (node)[0]));
+      for (unsigned int i = 0;
+	   i < SLP_TREE_LANE_PERMUTATION (node).length (); ++i)
+	if (SLP_TREE_LANE_PERMUTATION (node)[i].second != i)
+	  return true;
+      return false;
+    }
+  if (!stmt_info || !STMT_VINFO_GROUPED_ACCESS (stmt_info))
+    return false;
+  unsigned int group = DR_GROUP_SIZE (DR_GROUP_FIRST_ELEMENT (stmt_info));
+  return (SLP_TREE_LANES (node) < group
+	  || !multiple_p (GET_MODE_NUNITS (mode), group));
+}

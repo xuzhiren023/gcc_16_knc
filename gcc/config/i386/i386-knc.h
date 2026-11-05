@@ -21,6 +21,9 @@ along with GCC; see the file COPYING3.  If not see
 
 struct HARD_REG_SET;
 class _loop_vec_info;
+class _stmt_vec_info;
+struct _slp_tree;
+class vec_perm_indices;
 
 extern bool ix86_knc_packed_mode_p (machine_mode);
 extern bool ix86_knc_vector_move_mode_p (machine_mode);
@@ -36,6 +39,11 @@ extern void ix86_knc_expand_vector_init (rtx, rtx);
 extern void ix86_knc_expand_duplicate (rtx, rtx);
 extern bool ix86_knc_expand_mask_vec_cmp (rtx, enum rtx_code, rtx, rtx);
 extern bool ix86_knc_masked_epilogue_p (class _loop_vec_info *);
+extern bool ix86_knc_vectorize_vec_perm_const (machine_mode, machine_mode, rtx,
+					       rtx, rtx,
+					       const vec_perm_indices &);
+extern bool ix86_knc_two_input_perm_p (machine_mode, class _stmt_vec_info *,
+				       struct _slp_tree *);
 
 extern void ix86_expand_knc_cas (rtx *);
 extern void ix86_knc_expand_atomic_exchange (rtx *);

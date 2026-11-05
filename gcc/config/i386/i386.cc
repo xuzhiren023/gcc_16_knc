@@ -26804,6 +26804,10 @@ ix86_vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
       && (kind == unaligned_load || kind == unaligned_store)
       && stmt_info && gimple_call_internal_p (stmt_info->stmt))
     stmt_cost *= 1000;
+  /* ADR-0008 point 1: a two-input KNC permute is vpermd plus vpermd.  */
+  if (TARGET_KNC && kind == vec_perm
+      && ix86_knc_two_input_perm_p (mode, stmt_info, node))
+    stmt_cost *= 2;
 
   if (kind == vec_perm && vectype
       && GET_MODE_SIZE (TYPE_MODE (vectype)) == 32
