@@ -22314,6 +22314,8 @@ static int
 ix86_division_cost (const struct processor_costs *cost,
 			  enum machine_mode mode)
 {
+  if (TARGET_KNC && mode == V16SFmode)
+    return ix86_knc_division_cost (cost);
   machine_mode inner_mode = mode;
   if (VECTOR_MODE_P (mode))
     inner_mode = GET_MODE_INNER (mode);

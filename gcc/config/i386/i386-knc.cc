@@ -1011,3 +1011,185 @@ ix86_knc_sqrt_stmt_cost (tree vectype)
 {
   return VECTOR_TYPE_P (vectype) ? 19 * ix86_cost->sse_op : ix86_cost->fsqrt;
 }
+
+/* Small RTL constructors shared by the two division paths.  Each operation
+   remains visible to allocation and scheduling.  */
+static rtx
+knc_div_int (HOST_WIDE_INT n)
+{
+  return force_reg (V16SImode,
+                    gen_const_vec_duplicate (V16SImode, gen_int_mode (n, SImode)));
+}
+
+static rtx
+knc_div_float (HOST_WIDE_INT bits)
+{
+  return gen_lowpart (V16SFmode, knc_div_int (bits));
+}
+
+static rtx
+knc_div_bin (rtx_code code, rtx a, rtx b)
+{
+  return expand_simple_binop (GET_MODE (a), code, a, b, NULL_RTX,
+                             true, OPTAB_DIRECT);
+}
+
+static rtx
+knc_div_cmp (rtx_code code, rtx a, rtx b)
+{
+  rtx k = gen_reg_rtx (HImode);
+  ix86_knc_expand_mask_vec_cmp (k, code, a, b);
+  return k;
+}
+
+static rtx
+knc_div_blend (rtx k, rtx a, rtx b)
+{
+  rtx d = gen_reg_rtx (GET_MODE (a));
+  emit_insn (gen_rtx_SET (d, gen_rtx_VEC_MERGE (GET_MODE (a), a, b, k)));
+  return d;
+}
+
+/* Correct rounding: docs/research/knc-div-sqrt.md 2.2--2.4, Lemma B.
+   With integer divisor significand B, a/b is separated from midpoints
+   by at least u/(2B), and from other floats by u/B (Lemma M).  A faithful
+   q has an exactly representable residual a-b*q (Lemma A).  If
+   |b*y-1| < 1/(B+1), fma(a-b*q,y,q) stays on the correct side of every
+   rounding boundary, in every mode, and has the correct inexact flag.
+   The first correction makes q1 faithful; E1/E2/E4 check these claims.
+   Step 15 is essential: B=0xffffff with y0=1/2 otherwise leaves the
+   reciprocal error equal to, not smaller than, 1/(B+1).
+
+   Reduced operands avoid estimate DAZ/FZ.  Intermediates use RN-SAE;
+   only active regular lanes reach the dynamic-RC final FMA and scale.
+   A lane test guards the special/tiny path.  Special operands are
+   retained, regular operands become signed one.  Reciprocal of zero
+   raises #Z only for a finite nonzero numerator.  Tiny RN midpoints
+   are corrected using the sign of the exact residual; directed modes
+   need no double-rounding correction.  All memory traffic is explicit. */
+void
+ix86_knc_expand_div (rtx *operands, bool conditional)
+{
+  rtx a = force_reg (V16SFmode, operands[conditional ? 2 : 1]);
+  rtx b = force_reg (V16SFmode, operands[conditional ? 3 : 2]);
+  rtx active = conditional ? operands[1] : force_reg (HImode, constm1_rtx);
+  rtx otherwise = force_reg (V16SFmode, conditional ? operands[4]
+                                                  : CONST0_RTX (V16SFmode));
+  rtx zero = force_reg (V16SFmode, CONST0_RTX (V16SFmode));
+  rtx ma = gen_reg_rtx (V16SFmode), mb = gen_reg_rtx (V16SFmode);
+  rtx ea = gen_reg_rtx (V16SFmode), eb = gen_reg_rtx (V16SFmode);
+  rtx kf = gen_reg_rtx (V16SFmode), t = gen_reg_rtx (V16SFmode);
+  rtx k = gen_reg_rtx (V16SImode);
+  emit_insn (gen_knc_div_mant (ma, a, GEN_INT (0)));
+  emit_insn (gen_knc_div_mant (mb, b, GEN_INT (4)));
+  emit_insn (gen_knc_sqrt_exp (ea, a));
+  emit_insn (gen_knc_sqrt_exp (eb, b));
+  emit_insn (gen_knc_div_sub (kf, ea, eb));
+  emit_insn (gen_knc_div_sub (t, kf, kf));
+  rtx regular = knc_div_bin (AND, active, knc_div_cmp (EQ, t, zero));
+  emit_insn (gen_knc_sqrt_cvt (k, kf));
+  rtx sign = knc_div_int (0x80000000);
+  rtx sb = knc_div_bin (AND, gen_lowpart (V16SImode, b), sign);
+  ma = gen_lowpart (V16SFmode,
+                   knc_div_bin (XOR, gen_lowpart (V16SImode, ma), sb));
+  rtx y0 = gen_reg_rtx (V16SFmode), e0 = gen_reg_rtx (V16SFmode);
+  rtx y1 = gen_reg_rtx (V16SFmode), q0 = gen_reg_rtx (V16SFmode);
+  rtx r0 = gen_reg_rtx (V16SFmode), q1 = gen_reg_rtx (V16SFmode);
+  rtx r1 = gen_reg_rtx (V16SFmode), qm = gen_reg_rtx (V16SFmode);
+  emit_insn (gen_knc_div_rcp (y0, mb));
+  emit_insn (gen_knc_sqrt_fnma (e0, mb, y0, knc_div_float (0x3f800000)));
+  emit_insn (gen_knc_sqrt_fma (y1, e0, y0, y0));
+  /* Integer equality is quiet even for an inactive signalling NaN.  */
+  rtx all1 = knc_div_cmp (EQ, gen_lowpart (V16SImode, mb),
+                         knc_div_int (0x3fffffff));
+  y1 = knc_div_blend (all1, knc_div_float (0x3f000001), y1);
+  emit_insn (gen_knc_sqrt_mul (q0, ma, y1));
+  emit_insn (gen_knc_sqrt_fnma (r0, mb, q0, ma));
+  emit_insn (gen_knc_sqrt_fma (q1, r0, y1, q0));
+  emit_insn (gen_knc_sqrt_fnma (r1, mb, q1, ma));
+  emit_insn (gen_knc_fmav16sf_mask (qm, r1, y1, q1, regular));
+  rtx result = gen_reg_rtx (V16SFmode);
+  emit_insn (gen_knc_sqrt_scale (result, qm, k, regular));
+  rtx abs_mask = knc_div_int (0x7fffffff);
+  rtx ab = knc_div_bin (AND, gen_lowpart (V16SImode, result), abs_mask);
+  rtx tiny = knc_div_bin (AND, regular,
+                          knc_div_cmp (LEU, ab, knc_div_int (0x00800000)));
+  rtx special = knc_div_bin (XOR, active, regular);
+  rtx rare = knc_div_bin (IOR, special, tiny);
+  rtx_code_label *done = gen_label_rtx ();
+  emit_jump_insn (gen_knc_jkeq (rare, done));
+
+  rtx ai = gen_lowpart (V16SImode, a), bi = gen_lowpart (V16SImode, b);
+  rtx aa = knc_div_bin (AND, ai, abs_mask);
+  rtx bb = knc_div_bin (AND, bi, abs_mask);
+  rtx izero = knc_div_int (0), ione = knc_div_int (1);
+  rtx finite_limit = knc_div_int (0x7f7fffff);
+  rtx afin = knc_div_cmp (LTU, knc_div_bin (MINUS, aa, ione), finite_limit);
+  rtx bfin = knc_div_cmp (LTU, knc_div_bin (MINUS, bb, ione), finite_limit);
+  rtx aone = knc_div_bin (IOR, knc_div_bin (AND, ai, sign),
+                          knc_div_int (0x3f800000));
+  rtx bone = knc_div_bin (IOR, sb, knc_div_int (0x3f800000));
+  rtx ap = gen_lowpart (V16SFmode, knc_div_blend (afin, aone, ai));
+  rtx bp = gen_lowpart (V16SFmode, knc_div_blend (bfin, bone, bi));
+  rtx bz = knc_div_cmp (EQ, bb, izero);
+  rtx bzspecial = knc_div_bin (AND, special, bz);
+  rtx reciprocal = gen_lowpart (V16SFmode,
+                                knc_div_bin (IOR, sb, knc_div_int (0x7f800000)));
+  rtx nonzero = knc_div_bin (XOR, special, bzspecial);
+  rtx recip = gen_reg_rtx (V16SFmode), unused = gen_reg_rtx (V16SFmode);
+  emit_insn (gen_knc_div_rcp_flags (recip, bp, reciprocal, nonzero));
+  emit_insn (gen_knc_div_rcp_flags (unused, bp, zero,
+                                    knc_div_bin (AND, bzspecial, afin)));
+  emit_insn (gen_rtx_SET (result,
+                          gen_rtx_VEC_MERGE (V16SFmode,
+                            gen_rtx_MULT (V16SFmode, ap, recip), result, special)));
+
+  /* d is the number of significand bits lost on the subnormal grid.
+     Shifts >=32 produce zero, so the midpoint test also excludes d<=0
+     and d>24 without special scalar control flow.  */
+  rtx qabs = knc_div_bin (AND, gen_lowpart (V16SImode, qm), abs_mask);
+  rtx qe = gen_reg_rtx (V16SImode);
+  emit_insn (gen_knc_div_shift_right (qe, qabs, knc_div_int (23)));
+  rtx d = knc_div_bin (MINUS, ione, knc_div_bin (PLUS, qe, k));
+  rtx rr = gen_reg_rtx (V16SFmode);
+  emit_insn (gen_knc_sqrt_fnma (rr, mb, qm, ma));
+  rtx nonexact = knc_div_cmp (NE,
+                             knc_div_bin (AND, gen_lowpart (V16SImode, rr), abs_mask),
+                             izero);
+  rtx underflow = knc_div_bin (AND, tiny,
+                               knc_div_bin (AND, nonexact,
+                                 knc_div_cmp (GT, d, izero)));
+  emit_insn (gen_knc_div_underflow (unused, knc_div_float (0x00800000),
+                                    knc_div_float (0x3f7fffff), underflow));
+  rtx csr_mem = assign_stack_temp (SImode, 4);
+  emit_insn (gen_knc_div_mxcsr (csr_mem));
+  rtx csr = force_reg (SImode, csr_mem);
+  rtx rc = knc_div_bin (AND, csr, GEN_INT (0x6000));
+  emit_cmp_and_jump_insns (rc, const0_rtx, NE, NULL_RTX, SImode,
+                           true, done);
+  rtx sig = knc_div_bin (IOR,
+                         knc_div_bin (AND, qabs, knc_div_int (0x007fffff)),
+                         knc_div_int (0x00800000));
+  rtx shifted = gen_reg_rtx (V16SImode);
+  emit_insn (gen_knc_div_shift_left (shifted, sig,
+                                     knc_div_bin (MINUS, knc_div_int (32), d)));
+  rtx mid = knc_div_bin (AND, tiny, knc_div_cmp (EQ, shifted, sign));
+  /* Integer sign tests avoid signalling compares on special-lane NaNs. */
+  rtx ri = gen_lowpart (V16SImode, rr);
+  rtx up = knc_div_bin (AND, mid,
+                         knc_div_cmp (GT, ri, izero));
+  rtx down = knc_div_bin (AND, mid,
+                           knc_div_bin (AND, nonexact,
+                             knc_div_cmp (LT, ri, izero)));
+  emit_insn (gen_knc_div_scale_ru (result, qm, k, result, up));
+  emit_insn (gen_knc_div_scale_rd (result, qm, k, result, down));
+  emit_label (done);
+  emit_move_insn (operands[0], knc_div_blend (active, result, otherwise));
+}
+
+int
+ix86_knc_division_cost (const struct processor_costs *cost)
+{
+  /* Fast path count; constants and transfers have their own RTL costs. */
+  return 27 * cost->sse_op;
+}

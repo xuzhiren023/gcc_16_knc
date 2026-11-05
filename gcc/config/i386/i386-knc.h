@@ -81,4 +81,7 @@ ix86_knc_check_abi_container (machine_mode mode, int n, const RegClass *classes,
   return ix86_knc_check_abi_mode (mode, half);
 }
 
+extern void ix86_knc_expand_div (rtx *, bool);
+extern int ix86_knc_division_cost (const struct processor_costs *);
+
 #endif /* GCC_I386_KNC_H */
