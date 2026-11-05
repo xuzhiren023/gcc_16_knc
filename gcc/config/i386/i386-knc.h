@@ -42,6 +42,10 @@ extern bool ix86_knc_masked_epilogue_p (class _loop_vec_info *);
 extern bool ix86_knc_vectorize_vec_perm_const (machine_mode, machine_mode, rtx,
 					       rtx, rtx,
 					       const vec_perm_indices &);
+extern void ix86_knc_expand_sqrt (rtx *);
+extern bool ix86_knc_sqrt_rtx_cost (rtx, machine_mode, int *);
+extern bool ix86_knc_sqrt_stmt_p (int, class _stmt_vec_info *, tree);
+extern unsigned ix86_knc_sqrt_stmt_cost (tree);
 extern void ix86_knc_expand_reduc (enum rtx_code, rtx, rtx);
 extern bool ix86_knc_reduc_swizzle_p (rtx, machine_mode);
 extern bool ix86_knc_two_input_perm_p (machine_mode, class _stmt_vec_info *,

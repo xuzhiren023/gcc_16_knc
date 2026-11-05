@@ -1247,3 +1247,117 @@
   return "vp<logic><knc_int_suffix>\t{%g2%{badc%}, %g1, %g0|%g0, %g1, %g2%{badc%}}";
 }
   [(set_attr "type" "sselog") (set_attr "mode" "XI")])
+
+;; S5-10, Intel 327364-001 pp.157-179, 197-198, 221-222, 316, 324,
+;; 588-592.  Each UNSPEC is one register instruction: its rounding/SAE
+;; semantics differ from ordinary arithmetic.  Keep all operands visible.
+;; KNC gas 2.22 requires SAE before the immediate in AT&T syntax.
+(define_c_enum "unspec"
+  [UNSPEC_KNC_SQRT_MANT UNSPEC_KNC_SQRT_EXP UNSPEC_KNC_SQRT_CVT
+   UNSPEC_KNC_SQRT_RSQRT UNSPEC_KNC_SQRT_MUL UNSPEC_KNC_SQRT_FMA
+   UNSPEC_KNC_SQRT_FNMA UNSPEC_KNC_SQRT_SCALE UNSPEC_KNC_SQRT_FIXUP])
+(define_c_enum "unspecv" [UNSPECV_KNC_SQRT_INVALID])
+
+(define_insn "knc_sqrt_mant"
+  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
+        (unspec:V16SF [(match_operand:V16SF 1 "register_operand" "YJ")]
+                       UNSPEC_KNC_SQRT_MANT))]
+  "TARGET_KNC"
+  "vgetmantps\t{%{sae%}, $5, %g1, %g0|%g0, %g1, 5, %{sae%}}"
+  [(set_attr "type" "sse") (set_attr "mode" "V16SF")])
+
+(define_insn "knc_sqrt_exp"
+  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
+        (unspec:V16SF [(match_operand:V16SF 1 "register_operand" "YJ")]
+                       UNSPEC_KNC_SQRT_EXP))]
+  "TARGET_KNC"
+  "vgetexpps\t{%{sae%}, %g1, %g0|%g0, %g1, %{sae%}}"
+  [(set_attr "type" "sse") (set_attr "mode" "V16SF")])
+
+(define_insn "knc_sqrt_cvt"
+  [(set (match_operand:V16SI 0 "register_operand" "=YJ")
+        (unspec:V16SI [(match_operand:V16SF 1 "register_operand" "YJ")]
+                       UNSPEC_KNC_SQRT_CVT))]
+  "TARGET_KNC"
+  "vcvtfxpntps2dq\t{%{sae%}, $0, %g1, %g0|%g0, %g1, 0, %{sae%}}"
+  [(set_attr "type" "ssecvt") (set_attr "mode" "V16SF")])
+
+(define_insn "knc_sqrt_rsqrt"
+  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
+        (unspec:V16SF [(match_operand:V16SF 1 "register_operand" "YJ")]
+                       UNSPEC_KNC_SQRT_RSQRT))]
+  "TARGET_KNC"
+  "vrsqrt23ps\t{%{sae%}, %g1, %g0|%g0, %g1, %{sae%}}"
+  [(set_attr "type" "sse") (set_attr "mode" "V16SF")])
+
+(define_insn "knc_sqrt_mul"
+  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
+        (unspec:V16SF [(match_operand:V16SF 1 "register_operand" "YJ")
+                       (match_operand:V16SF 2 "register_operand" "YJ")]
+                      UNSPEC_KNC_SQRT_MUL))]
+  "TARGET_KNC"
+  "vmulps\t{%{rn-sae%}, %g2, %g1, %g0|%g0, %g1, %g2, %{rn-sae%}}"
+  [(set_attr "type" "ssemul") (set_attr "mode" "V16SF")])
+
+(define_insn "knc_sqrt_fma"
+  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
+        (unspec:V16SF [(match_operand:V16SF 1 "register_operand" "YJ")
+                       (match_operand:V16SF 2 "register_operand" "YJ")
+                       (match_operand:V16SF 3 "register_operand" "0")]
+                      UNSPEC_KNC_SQRT_FMA))]
+  "TARGET_KNC"
+  "vfmadd231ps\t{%{rn-sae%}, %g2, %g1, %g0|%g0, %g1, %g2, %{rn-sae%}}"
+  [(set_attr "type" "ssemuladd") (set_attr "mode" "V16SF")])
+
+(define_insn "knc_sqrt_fnma"
+  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
+        (unspec:V16SF [(match_operand:V16SF 1 "register_operand" "YJ")
+                       (match_operand:V16SF 2 "register_operand" "YJ")
+                       (match_operand:V16SF 3 "register_operand" "0")]
+                      UNSPEC_KNC_SQRT_FNMA))]
+  "TARGET_KNC"
+  "vfnmadd231ps\t{%{rn-sae%}, %g2, %g1, %g0|%g0, %g1, %g2, %{rn-sae%}}"
+  [(set_attr "type" "ssemuladd") (set_attr "mode" "V16SF")])
+
+(define_insn "knc_sqrt_scale"
+  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
+        (vec_merge:V16SF
+          (unspec:V16SF [(match_operand:V16SF 1 "register_operand" "0")
+                         (match_operand:V16SI 2 "register_operand" "YJ")]
+                        UNSPEC_KNC_SQRT_SCALE)
+          (match_dup 1)
+          (match_operand:HI 3 "register_operand" "YL")))]
+  "TARGET_KNC"
+  "vscaleps\t{%g2, %g1, %g0%{%3%}|%g0%{%3%}, %g1, %g2}"
+  [(set_attr "type" "ssemul") (set_attr "mode" "V16SF")])
+
+;; Volatile: the otherwise unused estimate must still raise invalid.
+(define_insn "knc_sqrt_invalid"
+  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
+        (unspec_volatile:V16SF
+          [(match_operand:V16SF 1 "register_operand" "0")
+           (match_operand:HI 2 "register_operand" "YL")]
+          UNSPECV_KNC_SQRT_INVALID))]
+  "TARGET_KNC"
+  "vrsqrt23ps\t{%g1, %g0%{%2%}|%g0%{%2%}, %g1}"
+  [(set_attr "type" "sse") (set_attr "mode" "V16SF")])
+
+(define_insn "knc_sqrt_fixup"
+  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
+        (unspec:V16SF [(match_operand:V16SF 1 "register_operand" "0")
+                       (match_operand:V16SF 2 "register_operand" "YJ")
+                       (match_operand:V16SI 3 "register_operand" "YJ")]
+                      UNSPEC_KNC_SQRT_FIXUP))]
+  "TARGET_KNC"
+  "vfixupnanps\t{%g3, %g2, %g0|%g0, %g2, %g3}"
+  [(set_attr "type" "sse") (set_attr "mode" "V16SF")])
+
+;; Private immediate shift for the square-root exponent path.  Do not
+;; advertise a general KNC shift optab in this ticket.
+(define_insn "knc_sqrt_shift"
+  [(set (match_operand:V16SI 0 "register_operand" "=YJ")
+        (ashiftrt:V16SI (match_operand:V16SI 1 "register_operand" "YJ")
+                       (const_int 1)))]
+  "TARGET_KNC"
+  "vpsrad\t{$1, %g1, %g0|%g0, %g1, 1}"
+  [(set_attr "type" "sseishft") (set_attr "mode" "XI")])

@@ -43,6 +43,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "targhooks.h"
 #include "fold-const.h"
 #include "gimple.h"
+#include "case-cfn-macros.h"
 #include "cfgloop.h"
 #include "tree-vectorizer.h"
 
@@ -901,4 +902,112 @@ ix86_knc_expand_reduc (enum rtx_code code, rtx dest, rtx src)
   /* Lane zero uses the existing scalar zmm transport (ADR-0004).  Any
      bridge to a GPR or x87 remains visible to register allocation.  */
   emit_move_insn (dest, gen_lowpart (GET_MODE (dest), src));
+}
+
+/* Correct rounding of V16SF sqrt: docs/research/knc-div-sqrt.md sections
+   2.3, 2.5 and 5 (E3), Intel 327364-001 pp.588-590 (estimate bound).
+
+   Lemma A: a faithful quotient has an exact FMA residual a-b*q.
+   Lemma M: a/b is not a midpoint and its distance from a midpoint is at
+   least u/(2B), and from another float at least u/B, B the significand
+   of b.  Lemma B: if |b*y-1| < 1/(B+1), the exact residual correction
+   rounds correctly, including directed modes and the inexact flag.
+   These division lemmas motivate the correcting step, but are NOT a
+   proof for sqrt: d=m-g1*g1 can be inexact.  E3 proves the sqrt claims
+   exhaustively for every reduced m and every estimate within 1 ulp
+   (stronger than the manual's 0.775 ulp), in all four rounding modes:
+   g1 is faithful; fma(d,h1,g1) rounds correctly and is inexact iff sqrt(m)
+   is not representable.  h1, rather than h0, is essential.
+
+   Reduction gives x=m*2^(2j), 1/2 <= m < 2, j=ceil(e/2), including
+   subnormals with DAZ clear.  sqrt(x) is normal and scaling is exact.
+   All intermediates suppress flags; only the final masked FMA can raise
+   inexact.  The masked estimate of negative inputs raises invalid, while
+   fixup preserves signed zero, +inf and quieted NaN payloads.  There is
+   no branch, helper call, hidden spill or implicit precision change.  */
+void
+ix86_knc_expand_sqrt (rtx *operands)
+{
+  rtx x = force_reg (V16SFmode, operands[1]);
+  rtx m = gen_reg_rtx (V16SFmode);
+  rtx e = gen_reg_rtx (V16SFmode);
+  rtx ei = gen_reg_rtx (V16SImode);
+  rtx j = gen_reg_rtx (V16SImode);
+  emit_insn (gen_knc_sqrt_mant (m, x));
+  emit_insn (gen_knc_sqrt_exp (e, x));
+  emit_insn (gen_knc_sqrt_cvt (ei, e));
+  rtx one = force_reg (V16SImode, CONST1_RTX (V16SImode));
+  emit_insn (gen_addv16si3 (ei, ei, one));
+  emit_insn (gen_knc_sqrt_shift (j, ei));
+
+  rtx xm = gen_reg_rtx (V16SImode);
+  emit_insn (gen_subv16si3 (xm, gen_lowpart (V16SImode, x), one));
+  rtx kreg = gen_reg_rtx (HImode);
+  rtx kneg = gen_reg_rtx (HImode);
+  rtx max = force_reg (V16SImode,
+                      gen_const_vec_duplicate (V16SImode, GEN_INT (0x7f7fffff)));
+  ix86_knc_expand_mask_vec_cmp (kreg, LTU, xm, max);
+  ix86_knc_expand_mask_vec_cmp (kneg, LT, xm,
+                              force_reg (V16SImode, CONSTM1_RTX (V16SImode)));
+
+  rtx half = force_reg (V16SFmode,
+                       gen_const_vec_duplicate (V16SFmode,
+                                                const_double_from_real_value
+                                                  (dconsthalf, SFmode)));
+  rtx y0 = gen_reg_rtx (V16SFmode);
+  rtx g0 = gen_reg_rtx (V16SFmode);
+  rtx h0 = gen_reg_rtx (V16SFmode);
+  rtx r0 = gen_reg_rtx (V16SFmode);
+  rtx g1 = gen_reg_rtx (V16SFmode);
+  rtx h1 = gen_reg_rtx (V16SFmode);
+  rtx d = gen_reg_rtx (V16SFmode);
+  rtx result = gen_reg_rtx (V16SFmode);
+  emit_insn (gen_knc_sqrt_rsqrt (y0, m));
+  emit_insn (gen_knc_sqrt_mul (g0, m, y0));
+  emit_insn (gen_knc_sqrt_mul (h0, y0, half));
+  emit_insn (gen_knc_sqrt_fnma (r0, g0, h0, half));
+  emit_insn (gen_knc_sqrt_fma (g1, g0, r0, g0));
+  emit_insn (gen_knc_sqrt_fma (h1, h0, r0, h0));
+  emit_insn (gen_knc_sqrt_fnma (d, g1, g1, m));
+  emit_insn (gen_knc_fmav16sf_mask (result, d, h1, g1, kreg));
+  emit_insn (gen_knc_sqrt_scale (result, result, j, kreg));
+  rtx unused = gen_reg_rtx (V16SFmode);
+  emit_insn (gen_knc_sqrt_invalid (unused, x, kneg));
+  rtx table = force_reg (V16SImode,
+                        gen_const_vec_duplicate (V16SImode, GEN_INT (0x206ad)));
+  emit_insn (gen_knc_sqrt_fixup (operands[0], result, x, table));
+}
+
+/* Instruction counts, not measured latency.  Constants and transfers are
+   costed separately.  Scalar SF sqrt uses x87; the vector sequence has
+   19 instructions for sixteen elements (research section 2.5).  */
+bool
+ix86_knc_sqrt_rtx_cost (rtx x, machine_mode mode, int *total)
+{
+  if (GET_CODE (x) != SQRT || mode != V16SFmode)
+    return false;
+  *total = COSTS_N_INSNS (19);
+  return true;
+}
+
+bool
+ix86_knc_sqrt_stmt_p (int kind, stmt_vec_info stmt, tree vectype)
+{
+  if ((kind != vector_stmt && kind != scalar_stmt) || !stmt || !vectype
+      || TYPE_MODE (vectype) != V16SFmode)
+    return false;
+  switch (gimple_call_combined_fn (stmt->stmt))
+    {
+    CASE_CFN_SQRT:
+    CASE_CFN_SQRT_FN:
+      return true;
+    default:
+      return false;
+    }
+}
+
+unsigned
+ix86_knc_sqrt_stmt_cost (tree vectype)
+{
+  return VECTOR_TYPE_P (vectype) ? 19 * ix86_cost->sse_op : ix86_cost->fsqrt;
 }
