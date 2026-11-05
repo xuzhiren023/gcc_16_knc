@@ -7972,7 +7972,7 @@ find_drap_reg (void)
   if (TARGET_64BIT)
     {
       /* In preserve_none functions, any register can be used for DRAP,
-	 except AX, R12â€“R15, DI, SI (argument registers), SP, and BP.  */
+	 except AX, R12–R15, DI, SI (argument registers), SP, and BP.  */
       if (cfun->machine->call_saved_registers == TYPE_PRESERVE_NONE)
 	return R11_REG;
 
