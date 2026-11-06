@@ -61,13 +61,19 @@ enum knc_builtin_code
   KNC_BUILTIN_SCATTER_DI
 };
 
-/* Construct a decl on demand; the caller owns the resulting tree, so no
-   unrooted static trees or front-end builtin registration are needed.  */
+/* Keep the internal decls alive without registering front-end builtins.
+   Their distinct function types identify the gather-only ABI exemption.  */
+static GTY(()) tree knc_indexed_decls[4];
+
 tree
 ix86_knc_builtin_decl (unsigned code)
 {
   if (code < KNC_BUILTIN_GATHER_DF || code > KNC_BUILTIN_SCATTER_DI)
     return error_mark_node;
+
+  unsigned slot = code - KNC_BUILTIN_GATHER_DF;
+  if (knc_indexed_decls[slot])
+    return knc_indexed_decls[slot];
 
   bool scatter = code >= KNC_BUILTIN_SCATTER_DF;
   bool fp = code == KNC_BUILTIN_GATHER_DF || code == KNC_BUILTIN_SCATTER_DF;
@@ -82,11 +88,24 @@ ix86_knc_builtin_decl (unsigned code)
   const char *name = scatter
     ? (fp ? "__builtin_knc_scatter_v8df" : "__builtin_knc_scatter_v8di")
     : (fp ? "__builtin_knc_gather_v8df" : "__builtin_knc_gather_v8di");
-  tree decl = build_fn_decl (name, type);
+  tree decl = build_fn_decl (name, build_distinct_type_copy (type));
   set_decl_built_in_function (decl, BUILT_IN_MD, code);
   DECL_PURE_P (decl) = !scatter;
   TREE_NOTHROW (decl) = !flag_non_call_exceptions;
-  return decl;
+  return knc_indexed_decls[slot] = decl;
+}
+
+/* Only these internal calls expand directly to a pseudo-register result.
+   A user function with the same signature still has the ordinary KNC ABI
+   and must not inherit this exemption through a canonical function type.  */
+bool
+ix86_knc_gather_type_p (const_tree fntype)
+{
+  return fntype
+    && ((knc_indexed_decls[0]
+         && fntype == TREE_TYPE (knc_indexed_decls[0]))
+        || (knc_indexed_decls[1]
+            && fntype == TREE_TYPE (knc_indexed_decls[1])));
 }
 
 static tree
@@ -1346,3 +1365,5 @@ ix86_knc_expand_pack (enum rtx_code code, rtx *ops)
   emit_insn (gen_knc_mask (mask, force_reg (HImode, GEN_INT (-256))));
   emit_insn (gen_knc_cvt_merge (mode, ops[0], hi, GEN_INT (0x44), lo, mask));
 }
+
+#include "gt-i386-knc.h"
