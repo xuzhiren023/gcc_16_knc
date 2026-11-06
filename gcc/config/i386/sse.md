@@ -3331,13 +3331,23 @@
 })
 
 (define_expand "<code><mode>3<mask_name><round_saeonly_name>"
-  [(set (match_operand:VFH 0 "register_operand")
-	(smaxmin:VFH
-	  (match_operand:VFH 1 "<round_saeonly_nimm_predicate>")
-	  (match_operand:VFH 2 "<round_saeonly_nimm_predicate>")))]
-  "TARGET_SSE && <mask_mode512bit_condition>
-   && <round_saeonly_mode512bit_condition>"
+  [(set (match_operand:VFH_KNC 0 "register_operand")
+	(smaxmin:VFH_KNC
+	  (match_operand:VFH_KNC 1 "<round_saeonly_nimm_predicate>")
+	  (match_operand:VFH_KNC 2 "<round_saeonly_nimm_predicate>")))]
+  "(TARGET_SSE && <mask_mode512bit_condition>
+    && <round_saeonly_mode512bit_condition>)
+   || ix86_knc_packed_mode_p (<MODE>mode)"
 {
+  if (TARGET_KNC)
+    {
+      operands[1] = force_reg (<MODE>mode, operands[1]);
+      operands[2] = force_reg (<MODE>mode, operands[2]);
+      emit_insn (gen_rtx_SET (operands[0],
+                             gen_rtx_fmt_ee (<CODE>, <MODE>mode,
+                                             operands[1], operands[2])));
+      DONE;
+    }
   if (!flag_finite_math_only || flag_signed_zeros)
     {
       operands[1] = force_reg (<MODE>mode, operands[1]);
@@ -4065,8 +4075,9 @@
    (V32HF "TARGET_AVX512FP16 && TARGET_AVX512VL")
    (V32HI "TARGET_AVX512BW")
    (V16SI "TARGET_AVX512F || ix86_knc_packed_mode_p (V16SImode)")
-   (V8DI "TARGET_AVX512F") (V16SF "TARGET_AVX512F")
-   (V8DF "TARGET_AVX512F")])
+   (V8DI "TARGET_AVX512F")
+   (V16SF "TARGET_AVX512F || ix86_knc_packed_mode_p (V16SFmode)")
+   (V8DF "TARGET_AVX512F || ix86_knc_packed_mode_p (V8DFmode)")])
 
 (define_expand "reduc_<code>_scal_<mode>"
   [(smaxmin:REDUC_SMINMAX_MODE
