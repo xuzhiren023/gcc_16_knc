@@ -326,7 +326,8 @@
           "=r,r,r,m,m,?*YK,?r,?*YK")
         (match_operand:HI 1 "general_operand"
           "r,m,n,r,n,r,*YK,*YK"))]
-  "TARGET_KNC && !(MEM_P (operands[0]) && MEM_P (operands[1]))"
+  "TARGET_KNC && !(MEM_P (operands[0]) && MEM_P (operands[1]))
+   && ix86_hardreg_mov_ok (operands[0], operands[1])"
   "@
    mov{w}\t{%1, %0|%0, %1}
    mov{w}\t{%1, %0|%0, %1}
@@ -351,7 +352,8 @@
           "=q,q,q,m,m,?*YK,?r,?*YK")
         (match_operand:QI 1 "general_operand"
           "q,m,n,q,n,r,*YK,*YK"))]
-  "TARGET_KNC && !(MEM_P (operands[0]) && MEM_P (operands[1]))"
+  "TARGET_KNC && !(MEM_P (operands[0]) && MEM_P (operands[1]))
+   && ix86_hardreg_mov_ok (operands[0], operands[1])"
   "@
    mov{l}\t{%k1, %k0|%k0, %k1}
    movz{bl|x}\t{%1, %k0|%k0, %1}
