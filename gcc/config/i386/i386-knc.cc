@@ -330,6 +330,10 @@ ix86_knc_unsupported_abi_type_p (const_tree type, machine_mode mode)
   switch (TREE_CODE (type))
     {
     case VECTOR_TYPE:
+      /* GCC 5 passed 32-byte short vectors in memory as BLKmode.  The
+         V16HI transport mode must not change that existing ABI.  */
+      if (mode == V16HImode)
+        return false;
       return mode == XImode || ix86_knc_packed_mode_p (mode)
 	     || ix86_knc_transport_mode_p (mode);
     case ARRAY_TYPE:
