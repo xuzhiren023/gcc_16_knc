@@ -4466,6 +4466,7 @@ ix86_libcall_value (machine_mode mode)
 static bool
 ix86_return_in_memory (const_tree type, const_tree fntype ATTRIBUTE_UNUSED)
 {
+  if (TARGET_KNC && ix86_knc_gather_type_p (fntype)) return false;
   if (TARGET_KNC && !ix86_knc_check_abi_type (type, TYPE_MODE (type)))
     return true;
   const machine_mode mode = type_natural_mode (type, NULL, true);
