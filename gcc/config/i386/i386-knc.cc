@@ -43,6 +43,8 @@ along with GCC; see the file COPYING3.  If not see
 #include "targhooks.h"
 #include "fold-const.h"
 #include "gimple.h"
+#include "gimple-iterator.h"
+#include "dumpfile.h"
 #include "case-cfn-macros.h"
 #include "cfgloop.h"
 #include "tree-vectorizer.h"
@@ -272,35 +274,134 @@ ix86_knc_support_vector_misalignment (machine_mode mode, int misalignment,
    be contiguous, forward, and known 64-byte aligned without a peel: after
    an alignment peel the epilogue's references have unknown misalignment
    (PR 92351), and a misaligned masked access has no IMCI form yet.  */
-bool
-ix86_knc_masked_epilogue_p (loop_vec_info loop_vinfo)
+static const char *
+knc_masked_epilogue_rejection (loop_vec_info loop_vinfo)
 {
-  if (!ix86_knc_packed_mode_p (loop_vinfo->vector_mode)
-      || LOOP_VINFO_PEELING_FOR_ALIGNMENT (loop_vinfo) != 0
+  if (!ix86_knc_packed_mode_p (loop_vinfo->vector_mode))
+    return "unsupported mode";
+  if (LOOP_VINFO_PEELING_FOR_ALIGNMENT (loop_vinfo) != 0
       || LOOP_REQUIRES_VERSIONING_FOR_ALIGNMENT (loop_vinfo))
-    return false;
+    return "misaligned masked access: alignment after peeling is unknown";
   for (data_reference *dr : LOOP_VINFO_DATAREFS (loop_vinfo))
     {
       dr_vec_info *dr_info = loop_vinfo->lookup_dr (dr);
       stmt_vec_info stmt_info = dr_info->stmt;
 
-      /* Gather/scatter references have no DR_STEP.  They cannot use this
-	 contiguous masked epilogue, so reject them before examining it.  */
+      /* Gather/scatter references have no DR_STEP.  */
       if (STMT_VINFO_GATHER_SCATTER_P (stmt_info))
-	return false;
+	return "gather/scatter needs a different masked epilogue";
       if (!STMT_VINFO_RELEVANT_P (stmt_info) || integer_zerop (DR_STEP (dr)))
 	continue;
       tree vectype = STMT_VINFO_VECTYPE (stmt_info);
       if (STMT_VINFO_STRIDED_P (stmt_info)
 	  || STMT_VINFO_GROUPED_ACCESS (stmt_info)
 	  || TREE_CODE (DR_STEP (dr)) != INTEGER_CST
-	  || tree_int_cst_sgn (DR_STEP (dr)) < 0
-	  || !vectype
+	  || tree_int_cst_sgn (DR_STEP (dr)) < 0)
+	return "non-contiguous or backward masked access";
+      if (!vectype
 	  || dr_misalignment (dr_info, vectype) != 0
 	  || !known_eq (DR_TARGET_ALIGNMENT (dr_info), 64U))
-	return false;
+	return "misaligned masked access: alignment not known to be 64 bytes";
     }
-  return true;
+  return nullptr;
+}
+
+bool
+ix86_knc_masked_epilogue_p (loop_vec_info loop_vinfo)
+{
+  return knc_masked_epilogue_rejection (loop_vinfo) == nullptr;
+}
+
+/* Report costed candidates, not the vectorizer's eventual selection.  The
+   existing loop-vectorized diagnostic identifies that selection.  Keep this
+   observational: in particular do not request masking or change any cost.
+   ADR-0006 entry dispatch; ADR-0007 point 7 alignment policy.  */
+void
+ix86_knc_report_loop (vec_info *vinfo, bool scalar_p)
+{
+  loop_vec_info loop_vinfo = dyn_cast<loop_vec_info> (vinfo);
+  if (!loop_vinfo || scalar_p || !dump_enabled_p ())
+    return;
+
+  const dump_flags_t info = MSG_OPTIMIZED_LOCATIONS | MSG_PRIORITY_USER_FACING;
+  const dump_flags_t missed = MSG_MISSED_OPTIMIZATION | MSG_PRIORITY_USER_FACING;
+  const char *reason = knc_masked_epilogue_rejection (loop_vinfo);
+  unsigned HOST_WIDE_INT vf = LOOP_VINFO_VECT_FACTOR (loop_vinfo).to_constant ();
+  dump_printf_loc (info, vect_location,
+		   "KNC candidate mode %s, factor = %wu (%s loop)\n",
+		   GET_MODE_NAME (loop_vinfo->vector_mode), vf,
+		   LOOP_VINFO_EPILOGUE_P (loop_vinfo) ? "epilogue" : "main");
+  int peel = LOOP_VINFO_PEELING_FOR_ALIGNMENT (loop_vinfo);
+  dump_printf_loc (info, vect_location,
+		   "KNC candidate scalar peel: %s (alignment iterations %d, "
+		   "gap peel %d)\n",
+		   peel || LOOP_VINFO_PEELING_FOR_GAPS (loop_vinfo)
+		   ? "required" : "not required", peel,
+		   (int) LOOP_VINFO_PEELING_FOR_GAPS (loop_vinfo));
+  if (reason)
+    {
+      dump_printf_loc (info, vect_location,
+		       "KNC candidate scalar epilogue: %s\n", reason);
+      dump_printf_loc (missed, vect_location,
+		       "KNC rejected masked epilogue candidate: %s\n", reason);
+    }
+  else
+    dump_printf_loc (info, vect_location,
+		     "KNC candidate masked epilogue eligible: every access "
+		     "64-byte aligned; generic profitability and operation "
+		     "support still apply\n");
+
+  unsigned gathers = 0, scatters = 0, converting = 0, masks = 0;
+  for (data_reference *dr : LOOP_VINFO_DATAREFS (loop_vinfo))
+    {
+      stmt_vec_info stmt = loop_vinfo->lookup_dr (dr)->stmt;
+      if (!STMT_VINFO_RELEVANT_P (stmt))
+	continue;
+      if (STMT_VINFO_GATHER_SCATTER_P (stmt))
+	(DR_IS_READ (dr) ? gathers : scatters)++;
+      tree type = STMT_VINFO_VECTYPE (stmt);
+      if (type)
+	{
+	  /* Mixed-type loops can have several modes but one loop VF.  */
+	  dump_printf_loc (info, vect_location,
+			   "KNC candidate access mode %s, factor = %wu\n",
+			   GET_MODE_NAME (TYPE_MODE (type)), vf);
+	  if (ix86_knc_transport_mode_p (TYPE_MODE (type))
+	      || TYPE_PRECISION (TREE_TYPE (DR_REF (dr)))
+		 != TYPE_PRECISION (TREE_TYPE (type)))
+	    converting++;
+	}
+      gimple *call = stmt->stmt;
+      if (gimple_call_internal_p (call, IFN_MASK_LOAD)
+	  || gimple_call_internal_p (call, IFN_MASK_STORE))
+	masks++;
+    }
+  dump_printf_loc (info, vect_location,
+		   "KNC candidate accesses: gather %u, scatter %u, "
+		   "converting %u, masked %u; reductions %u\n",
+		   gathers, scatters, converting, masks,
+		   LOOP_VINFO_REDUCTIONS (loop_vinfo).length ());
+  for (unsigned i = 0; i < loop_vinfo->nbbs; ++i)
+    for (gimple_stmt_iterator gsi = gsi_start_bb (loop_vinfo->bbs[i]);
+	 !gsi_end_p (gsi); gsi_next (&gsi))
+      {
+	gimple *stmt = gsi_stmt (gsi);
+	if (is_gimple_call (stmt) && !gimple_call_internal_p (stmt))
+	  {
+	    tree decl = gimple_call_fndecl (stmt);
+	    if (decl)
+	      dump_printf_loc (info, stmt,
+			       "KNC candidate body call %qD "
+			       "(before target lowering)\n", decl);
+	    else
+	      dump_printf_loc (info, stmt,
+			       "KNC candidate indirect body call\n");
+	  }
+      }
+  dump_printf_loc (info, vect_location,
+		   "KNC candidate: helper calls introduced by target lowering "
+		   "and register-allocation spills are not known at vector "
+		   "costing\n");
 }
 
 /* Also guard recognition after combine and reload.  Keep MEM_ALIGN in

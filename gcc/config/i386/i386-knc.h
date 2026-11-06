@@ -47,6 +47,7 @@ extern void ix86_knc_fixup_binary_operands (machine_mode, rtx *);
 extern void ix86_knc_expand_vector_init (rtx, rtx);
 extern void ix86_knc_expand_duplicate (rtx, rtx);
 extern bool ix86_knc_expand_mask_vec_cmp (rtx, enum rtx_code, rtx, rtx);
+extern void ix86_knc_report_loop (class vec_info *, bool);
 extern bool ix86_knc_masked_epilogue_p (class _loop_vec_info *);
 extern bool ix86_knc_vectorize_vec_perm_const (machine_mode, machine_mode, rtx,
 					       rtx, rtx,
