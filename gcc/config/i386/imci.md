@@ -757,15 +757,20 @@
 ;; The card probe confirmed signed address-width scaling, masked fault
 ;; suppression, restartability and highest-active-lane-wins scatter order.
 (define_mode_iterator KNC_GATHER16 [V16SF V16SI])
-(define_mode_attr knc_gather_op [(V16SF "vgatherdps") (V16SI "vpgatherdd")])
-(define_mode_attr knc_scatter_op [(V16SF "vscatterdps") (V16SI "vpscatterdd")])
+(define_mode_iterator KNC_GATHER [V16SF V16SI V8DF V8DI])
+(define_mode_attr knc_gather_op
+  [(V16SF "vgatherdps") (V16SI "vpgatherdd")
+   (V8DF "vgatherdpd") (V8DI "vpgatherdq")])
+(define_mode_attr knc_scatter_op
+  [(V16SF "vscatterdps") (V16SI "vpscatterdd")
+   (V8DF "vscatterdpd") (V8DI "vpscatterdq")])
 (define_c_enum "unspec"
   [UNSPEC_KNC_GATHER UNSPEC_KNC_SCATTER UNSPEC_KNC_VSIBADDR])
 
 (define_insn "knc_gather<mode>"
-  [(set (match_operand:KNC_GATHER16 0 "register_operand" "=&YJ")
-        (unspec:KNC_GATHER16
-          [(match_operand:KNC_GATHER16 1 "register_operand" "0")
+  [(set (match_operand:KNC_GATHER 0 "register_operand" "=&YJ")
+        (unspec:KNC_GATHER
+          [(match_operand:KNC_GATHER 1 "register_operand" "0")
            (match_operand:HI 7 "register_operand" "5")
            (match_operator:BLK 6 "vsib_mem_operator"
              [(unspec:DI
@@ -791,7 +796,7 @@
               (match_operand:HI 6 "register_operand" "4")]
              UNSPEC_KNC_VSIBADDR)])
         (unspec:BLK
-          [(match_operand:KNC_GATHER16 3 "register_operand" "YJ")
+          [(match_operand:KNC_GATHER 3 "register_operand" "YJ")
            (match_dup 6)]
           UNSPEC_KNC_SCATTER))
    (clobber (match_scratch:HI 4 "=&YL"))]

@@ -46,6 +46,135 @@ along with GCC; see the file COPYING3.  If not see
 #include "case-cfn-macros.h"
 #include "cfgloop.h"
 #include "tree-vectorizer.h"
+#include "i386-builtins.h"
+
+/* These middle-end-only builtins use the low eight signed dwords of a
+   V16SI index.  Keep their codes outside the shared x86 builtin tables.
+   ADR-0008 point 6; Intel 327364-001 pp.297-299, 487-489, 533-535,
+   601-603.  The eight-lane forms clear k[15:8], so the same jknzd retry
+   loop used by the sixteen-lane patterns tests completion correctly.  */
+enum knc_builtin_code
+{
+  KNC_BUILTIN_GATHER_DF = IX86_BUILTIN_MAX + 1,
+  KNC_BUILTIN_GATHER_DI,
+  KNC_BUILTIN_SCATTER_DF,
+  KNC_BUILTIN_SCATTER_DI
+};
+
+/* Keep the internal decls alive without registering front-end builtins.
+   Their distinct function types identify the gather-only ABI exemption.  */
+static GTY(()) tree knc_indexed_decls[4];
+
+tree
+ix86_knc_builtin_decl (unsigned code)
+{
+  if (code < KNC_BUILTIN_GATHER_DF || code > KNC_BUILTIN_SCATTER_DI)
+    return error_mark_node;
+
+  unsigned slot = code - KNC_BUILTIN_GATHER_DF;
+  if (knc_indexed_decls[slot])
+    return knc_indexed_decls[slot];
+
+  bool scatter = code >= KNC_BUILTIN_SCATTER_DF;
+  bool fp = code == KNC_BUILTIN_GATHER_DF || code == KNC_BUILTIN_SCATTER_DF;
+  tree data = build_vector_type (fp ? double_type_node : intDI_type_node, 8);
+  tree index = build_vector_type (intSI_type_node, 16);
+  tree mask = short_unsigned_type_node;
+  tree type = scatter
+    ? build_function_type_list (void_type_node, ptr_type_node, mask, index,
+				data, integer_type_node, NULL_TREE)
+    : build_function_type_list (data, data, const_ptr_type_node, index,
+				mask, integer_type_node, NULL_TREE);
+  const char *name = scatter
+    ? (fp ? "__builtin_knc_scatter_v8df" : "__builtin_knc_scatter_v8di")
+    : (fp ? "__builtin_knc_gather_v8df" : "__builtin_knc_gather_v8di");
+  tree decl = build_fn_decl (name, build_distinct_type_copy (type));
+  set_decl_built_in_function (decl, BUILT_IN_MD, code);
+  DECL_PURE_P (decl) = !scatter;
+  TREE_NOTHROW (decl) = !flag_non_call_exceptions;
+  return knc_indexed_decls[slot] = decl;
+}
+
+/* Only these internal calls expand directly to a pseudo-register result.
+   A user function with the same signature still has the ordinary KNC ABI
+   and must not inherit this exemption through a canonical function type.  */
+bool
+ix86_knc_gather_type_p (const_tree fntype_or_decl)
+{
+  const_tree fntype = fntype_or_decl && DECL_P (fntype_or_decl)
+    ? TREE_TYPE (fntype_or_decl) : fntype_or_decl;
+  return fntype
+    && ((knc_indexed_decls[0]
+         && fntype == TREE_TYPE (knc_indexed_decls[0]))
+        || (knc_indexed_decls[1]
+            && fntype == TREE_TYPE (knc_indexed_decls[1])));
+}
+
+static tree
+knc_indexed_builtin (const_tree vectype, const_tree index_type, int scale,
+		     bool scatter)
+{
+  if (!TARGET_64BIT || TREE_CODE (index_type) != INTEGER_TYPE
+      || TYPE_MODE (index_type) != SImode || TYPE_UNSIGNED (index_type)
+      || scale <= 0 || scale > 8 || (scale & (scale - 1)) != 0)
+    return NULL_TREE;
+
+  machine_mode mode = TYPE_MODE (vectype);
+  if (mode != V8DFmode && mode != V8DImode)
+    return NULL_TREE;
+  unsigned code = scatter ? KNC_BUILTIN_SCATTER_DF : KNC_BUILTIN_GATHER_DF;
+  return ix86_knc_builtin_decl (code + (mode == V8DImode));
+}
+
+tree
+ix86_knc_vectorize_builtin_gather (const_tree vectype, const_tree index_type,
+				  int scale)
+{
+  return knc_indexed_builtin (vectype, index_type, scale, false);
+}
+
+tree
+ix86_knc_vectorize_builtin_scatter (const_tree vectype, const_tree index_type,
+				   int scale)
+{
+  return knc_indexed_builtin (vectype, index_type, scale, true);
+}
+
+rtx
+ix86_knc_expand_builtin (tree exp, rtx target)
+{
+  unsigned code = DECL_MD_FUNCTION_CODE (TREE_OPERAND (CALL_EXPR_FN (exp), 0));
+  gcc_assert (code >= KNC_BUILTIN_GATHER_DF && code <= KNC_BUILTIN_SCATTER_DI);
+  bool scatter = code >= KNC_BUILTIN_SCATTER_DF;
+  bool fp = code == KNC_BUILTIN_GATHER_DF || code == KNC_BUILTIN_SCATTER_DF;
+  machine_mode mode = fp ? V8DFmode : V8DImode;
+  rtx ops[5];
+  for (unsigned i = 0; i < 5; ++i)
+    ops[i] = expand_normal (CALL_EXPR_ARG (exp, i));
+  rtx base = force_reg (Pmode, ops[scatter ? 0 : 1]);
+  rtx index = force_reg (V16SImode, ops[2]);
+  rtx mask = force_reg (HImode, ops[scatter ? 1 : 3]);
+  rtx data = force_reg (mode, ops[scatter ? 3 : 0]);
+  rtx scale = ops[4];
+  gcc_assert (const1248_operand (scale, SImode));
+  rtvec address = scatter ? gen_rtvec (4, base, index, scale, mask)
+			 : gen_rtvec (3, base, index, scale);
+  rtx mem = gen_rtx_MEM (BLKmode,
+		       gen_rtx_UNSPEC (DImode, address, UNSPEC_KNC_VSIBADDR));
+  if (scatter)
+    {
+      emit_insn (fp
+	? gen_knc_scatterv8df (base, index, scale, data, NULL_RTX, mem, mask)
+	: gen_knc_scatterv8di (base, index, scale, data, NULL_RTX, mem, mask));
+      return const0_rtx;
+    }
+  if (!target || !register_operand (target, mode))
+    target = gen_reg_rtx (mode);
+  emit_insn (fp
+    ? gen_knc_gatherv8df (target, data, base, index, scale, NULL_RTX, mem, mask)
+    : gen_knc_gatherv8di (target, data, base, index, scale, NULL_RTX, mem, mask));
+  return target;
+}
 
 /* Exactly the packed storage modes in ADR-0005 point 1.  This predicate
    does not advertise arithmetic, an ABI, or automatic vectorization.  */
@@ -1238,3 +1367,5 @@ ix86_knc_expand_pack (enum rtx_code code, rtx *ops)
   emit_insn (gen_knc_mask (mask, force_reg (HImode, GEN_INT (-256))));
   emit_insn (gen_knc_cvt_merge (mode, ops[0], hi, GEN_INT (0x44), lo, mask));
 }
+
+#include "gt-i386-knc.h"

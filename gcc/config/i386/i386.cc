@@ -4417,6 +4417,7 @@ ix86_function_value_1 (const_tree valtype, const_tree fntype_or_decl,
 static rtx
 ix86_function_value (const_tree valtype, const_tree fntype_or_decl, bool)
 {
+  if (TARGET_KNC && ix86_knc_gather_type_p (fntype_or_decl)) return gen_rtx_REG (TYPE_MODE (valtype), FIRST_SSE_REG);
   machine_mode mode, orig_mode;
 
   orig_mode = TYPE_MODE (valtype);
@@ -4466,6 +4467,7 @@ ix86_libcall_value (machine_mode mode)
 static bool
 ix86_return_in_memory (const_tree type, const_tree fntype ATTRIBUTE_UNUSED)
 {
+  if (TARGET_KNC && ix86_knc_gather_type_p (fntype)) return false;
   if (TARGET_KNC && !ix86_knc_check_abi_type (type, TYPE_MODE (type)))
     return true;
   const machine_mode mode = type_natural_mode (type, NULL, true);
@@ -19816,7 +19818,8 @@ ix86_gimple_fold_builtin (gimple_stmt_iterator *gsi)
   location_t loc;
 
   /* Don't fold when there's isa mismatch.  */
-  if (!ix86_check_builtin_isa_match (fn_code, NULL, NULL))
+  if ((TARGET_KNC && fn_code > IX86_BUILTIN_MAX)
+      || !ix86_check_builtin_isa_match (fn_code, NULL, NULL))
     return false;
 
   switch (fn_code)
@@ -20723,6 +20726,9 @@ static tree
 ix86_vectorize_builtin_scatter (const_tree vectype,
 				const_tree index_type, int scale)
 {
+  if (TARGET_KNC)
+    return ix86_knc_vectorize_builtin_scatter (vectype, index_type, scale);
+
   bool si;
   enum ix86_builtins code;
 

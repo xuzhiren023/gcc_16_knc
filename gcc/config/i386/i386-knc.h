@@ -29,6 +29,11 @@ extern bool ix86_knc_packed_mode_p (machine_mode);
 extern bool ix86_knc_vector_move_mode_p (machine_mode);
 extern machine_mode ix86_knc_preferred_simd_mode (scalar_mode);
 extern bool ix86_knc_support_vector_misalignment (machine_mode, int, bool, bool);
+extern tree ix86_knc_vectorize_builtin_gather (const_tree, const_tree, int);
+extern tree ix86_knc_vectorize_builtin_scatter (const_tree, const_tree, int);
+extern tree ix86_knc_builtin_decl (unsigned);
+extern rtx ix86_knc_expand_builtin (tree, rtx);
+extern bool ix86_knc_gather_type_p (const_tree);
 
 extern bool ix86_knc_element_aligned_mem_p (rtx, machine_mode);
 extern bool ix86_knc_zero_constant_p (rtx, machine_mode);
