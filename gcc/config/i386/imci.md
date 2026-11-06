@@ -12,6 +12,11 @@
 (define_register_constraint "YL" "TARGET_KNC ? MASK_REGS : NO_REGS"
  "@internal KNC nonzero predicate register.")
 
+(define_constraint "Yn"
+ "@internal KNC all-ones mask constant."
+ (and (match_code "const_int")
+      (match_test "TARGET_KNC && op == constm1_rtx")))
+
 ;; Shared move expanders retain their original SSE modes as well as KNC.
 (define_mode_iterator VMOVE_KNC
   [(V64QI "TARGET_AVX512F") (V32QI "TARGET_AVX") V16QI
@@ -318,14 +323,16 @@
   "kmov\t%k1, %0"
   [(set_attr "type" "mskmov")])
 
+;; Peephole2 folds GPR loads of 0/-1 into mask moves.  KNC materializes
+;; these with KXOR/KXNOR (Intel 327364-001), without a GPR scratch.
 ;; A complete HI move must recognize LRA's pseudos before allocation.
 ;; Prefer GPRs for ordinary shorts; register forms follow donor *movhi_internal.
 ;; K1OM GAS rejects kmov memory operands, so spill masks through a GPR.
 (define_insn "*knc_movhi"
   [(set (match_operand:HI 0 "nonimmediate_operand"
-          "=r,r,r,m,m,?*YK,?r,?*YK")
+          "=r,r,r,m,m,?*YK,?r,?*YK,?*YK,?*YK")
         (match_operand:HI 1 "general_operand"
-          "r,m,n,r,n,r,*YK,*YK"))]
+          "r,m,n,r,n,r,*YK,*YK,C,Yn"))]
   "TARGET_KNC && !(MEM_P (operands[0]) && MEM_P (operands[1]))"
   "@
    mov{w}\t{%1, %0|%0, %1}
@@ -335,8 +342,10 @@
    mov{w}\t{%1, %0|%0, %1}
    kmov\t{%k1, %0|%0, %k1}
    kmov\t{%1, %k0|%k0, %1}
-   kmov\t{%1, %0|%0, %1}"
-  [(set_attr "type" "imov,imov,imov,imov,imov,mskmov,mskmov,mskmov")
+   kmov\t{%1, %0|%0, %1}
+   kxor\t%0, %0
+   kxnor\t%0, %0"
+  [(set_attr "type" "imov,imov,imov,imov,imov,mskmov,mskmov,mskmov,msklog,msklog")
    (set_attr "mode" "HI")])
 
 ;; ADR-0007 point 1: 8-lane masks are QI.  Like *knc_movhi, a complete QI
@@ -348,9 +357,9 @@
 ;; also copies bits 15:8 of the mask; a QI value never reads them.
 (define_insn "*knc_movqi"
   [(set (match_operand:QI 0 "nonimmediate_operand"
-          "=q,q,q,m,m,?*YK,?r,?*YK")
+          "=q,q,q,m,m,?*YK,?r,?*YK,?*YK,?*YK")
         (match_operand:QI 1 "general_operand"
-          "q,m,n,q,n,r,*YK,*YK"))]
+          "q,m,n,q,n,r,*YK,*YK,C,Yn"))]
   "TARGET_KNC && !(MEM_P (operands[0]) && MEM_P (operands[1]))"
   "@
    mov{l}\t{%k1, %k0|%k0, %k1}
@@ -360,9 +369,11 @@
    mov{b}\t{%1, %0|%0, %1}
    kmov\t{%k1, %0|%0, %k1}
    kmov\t{%1, %k0|%k0, %1}
-   kmov\t{%1, %0|%0, %1}"
-  [(set_attr "type" "imov,imovx,imov,imov,imov,mskmov,mskmov,mskmov")
-   (set_attr "mode" "SI,SI,SI,QI,QI,QI,QI,QI")])
+   kmov\t{%1, %0|%0, %1}
+   kxor\t%0, %0
+   kxnor\t%0, %0"
+  [(set_attr "type" "imov,imovx,imov,imov,imov,mskmov,mskmov,mskmov,msklog,msklog")
+   (set_attr "mode" "SI,SI,SI,QI,QI,QI,QI,QI,QI,QI")])
 
 (define_insn "knc_store<mode>"
   [(set (match_operand:KNC_SCALAR 0 "memory_operand" "=m")
