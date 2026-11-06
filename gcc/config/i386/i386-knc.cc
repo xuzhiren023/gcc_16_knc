@@ -50,6 +50,161 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-vectorizer.h"
 #include "i386-builtins.h"
 
+/* S6-03 docs/research/knc-characterization.md, measured 2026-11-06.
+   Cost units below are per-core cycles (COSTS_N_INSNS), or twice cycles
+   for register/memory moves.  E denotes an estimate, with its reason.
+   CH denotes a row of that table.  No SSE/AVX feature is enabled here.  */
+static stringop_algs knc_stringops[2] = {
+  {libcall, {{-1, libcall, false}}},
+  {libcall, {{-1, libcall, false}}}
+}; /* E: no measured stringop crossover; keep size-independent libc calls.  */
+
+static processor_costs
+knc_processor_costs (unsigned chains)
+{
+  return {
+    {
+      2, {2, 2, 2}, {2, 2, 2}, /* CH l1.load_rt/store_normal, rounded 1.  */
+      2,                       /* E: x87 register move, one U-pipe op.  */
+      {2, 2, 4}, {2, 2, 4},    /* E: L1 moves; XF uses two word transfers.  */
+      2, {2, 2}, {2, 2},       /* E: MMX unavailable; one-op placeholders.  */
+      2, 2, 2,                /* CH vector issue; narrow modes share ZMM.  */
+      {2, 2, 2, 2, 2}, {2, 2, 2, 2, 2}, /* CH masked_load/store.rt.  */
+      24, 24,                 /* E: dependent memory bridge, CH latency 12.  */
+      1, 1,                   /* CH kmov.rt: half cycle per core.  */
+      {2, 2, 2}, {2, 2, 2},    /* E: mask memory access like scalar L1.  */
+      1                       /* CH kmov.rt.  */
+    },
+    COSTS_N_INSNS (1) / 2,     /* CH scalar_add.rt: half cycle.  */
+    COSTS_N_INSNS (1),         /* E: LEA, one unpaired address operation.  */
+    COSTS_N_INSNS (1), COSTS_N_INSNS (1), /* E: shifts, one scalar op.  */
+    {COSTS_N_INSNS (3), COSTS_N_INSNS (3), COSTS_N_INSNS (3),
+     COSTS_N_INSNS (3), COSTS_N_INSNS (6)}, /* E: integer mul, 3; TI two.  */
+    0,                        /* E: multiply not dependent on set bits.  */
+    {COSTS_N_INSNS (16), COSTS_N_INSNS (22), COSTS_N_INSNS (30),
+     COSTS_N_INSNS (74), COSTS_N_INSNS (74)}, /* E: unmeasured integer div;
+                                             retain generic estimates.  */
+    COSTS_N_INSNS (1), COSTS_N_INSNS (1), /* E: extensions, one scalar op.  */
+    8, 17, 10,                /* E: generic size/copy/clear thresholds;
+                                 no code-size crossover measured.  */
+    {2, 2, 2}, {2, 2, 2},    /* CH l1.load_rt/store_normal.  */
+    {2, 2, 2, 2, 2}, {2, 2, 2, 2, 2}, /* CH masked_load/store.rt.  */
+    {4, 4, 4, 4, 4},         /* CH unpack.rt: two ops.  */
+    {4, 4, 4, 4, 4},         /* E: pack-store pair analogous to unpack.  */
+    2, 2, 2,                /* CH vector issue.  */
+    24, 24,                 /* E: memory bridge, CH dependent latency 12.  */
+    0, 16,                  /* E: 8 cycles/lane from gather_scattered.rt;
+                               the stmt hook refines by lines touched.  */
+    0, 16,                  /* E: scatter uses gather's line-service cost.  */
+    32, 512, 64,            /* ADR-0009 point 6: L1/L2 KB and line bytes;
+                               both caches 8-way (no GCC cost field).  */
+    4,                      /* E: one outstanding prefetch per HW thread;
+                               no measured queue capacity yet.  */
+    3,                      /* E: retain generic branch heuristic.  */
+    COSTS_N_INSNS (1),       /* CH x87_add.rt.  */
+    COSTS_N_INSNS (2),       /* CH x87_mul.rt.  */
+    COSTS_N_INSNS (38),      /* CH x87_div.rt, not pipelined.  */
+    COSTS_N_INSNS (1), COSTS_N_INSNS (1), /* E: fabs/fchs, one U op.  */
+    COSTS_N_INSNS (38),      /* E: sqrt unmeasured, use serial divide.  */
+    COSTS_N_INSNS (1),       /* CH vpaddd/vpxord.rt.  */
+    COSTS_N_INSNS (1),       /* CH vaddps/pd.rt.  */
+    COSTS_N_INSNS (1), COSTS_N_INSNS (1), /* CH vmulps/pd.rt.  */
+    COSTS_N_INSNS (1), COSTS_N_INSNS (1), /* CH vfmadd213ps/pd.rt.  */
+    COSTS_N_INSNS (38), COSTS_N_INSNS (38), /* E: no native vector div;
+                                           scalar fallback; SF hook overrides.  */
+    COSTS_N_INSNS (38), COSTS_N_INSNS (38), /* E: sqrt as above.  */
+    COSTS_N_INSNS (1), COSTS_N_INSNS (1), COSTS_N_INSNS (1),
+                            /* CH convert_up/down.rt, one memory op.  */
+    COSTS_N_INSNS (1), COSTS_N_INSNS (1),
+    COSTS_N_INSNS (1), COSTS_N_INSNS (1), /* CH vcvtfxpnt*.rt.  */
+    1, 1, int (chains), int (chains),   /* E: scalar reassociation unchanged at one;
+                              vectors: CH latency 4 / per-thread issue.  */
+    {chains, chains, chains}, /* CH add/mul/FMA latency 4; E: dot/SAD use
+                                 same bound until separately measured.  */
+    2,                     /* CH latency 4 / minimum issue interval 2.  */
+    knc_stringops, knc_stringops,
+    COSTS_N_INSNS (4), COSTS_N_INSNS (2), /* E: generic branch estimates,
+                                          branch latency unmeasured.  */
+    "16", "16:11:8", "0:0:8", "16", /* E: generic code alignment pending
+                                       front-end measurements.  */
+    4, 2, COSTS_N_INSNS (2) /* E: generic small unroll/mispredict heuristics;
+                              only reduction unrolling measured here.  */
+  };
+}
+
+const processor_costs *
+ix86_knc_tune_cost (const gcc_options *opts, const processor_costs *fallback)
+{
+  if (!opts->x_ix86_tune_string
+      || strcmp (opts->x_ix86_tune_string, "knc"))
+    return fallback;
+  /* CH point 1: one thread issues every other cycle.  Two chains suffice
+     at 1 or 2 threads, ceil(4/3) at 3, and one chain at 4.  */
+  static const processor_costs four_threads = knc_processor_costs (1);
+  static const processor_costs fewer_threads = knc_processor_costs (2);
+  return opts->x_knc_threads_per_core == 4 ? &four_threads : &fewer_threads;
+}
+
+/* Costs that need KNC lowering knowledge rather than x86 mode splitting.  */
+int
+ix86_knc_stmt_cost (int kind, machine_mode mode, stmt_vec_info stmt)
+{
+  switch (kind)
+    {
+    case vector_gather_load:
+    case vector_scatter_store:
+      {
+        unsigned lanes = GET_MODE_NUNITS (mode);
+        unsigned lines = lanes; /* E: unknown indices, one line per lane.  */
+        if (stmt && STMT_VINFO_DR_INFO (stmt))
+          {
+            tree step = DR_STEP (STMT_VINFO_DR_INFO (stmt)->dr);
+            if (step && tree_fits_shwi_p (step))
+              {
+                HOST_WIDE_INT stride = tree_to_shwi (step);
+                /* Avoid overflow; strides of at least a line touch LANES.  */
+                if (stride > -64 && stride < 64)
+                  lines = MAX (1U, (unsigned) CEIL (lanes * (stride < 0 ? -stride : stride), 64));
+              }
+          }
+        /* CH gather_all.rt = 7, gather_scattered.rt = 127.  E: interpolate
+           line service plus retry overhead; stride 2 FP32 = 14 cycles.
+           Scatter is estimated from the same line service, not measured.  */
+        return COSTS_N_INSNS (7 * lines + lines * (lines - 1) / 16);
+      }
+    case vec_perm:
+      return COSTS_N_INSNS (1); /* CH vpermd/vpermf32x4/swizzle.rt.  */
+    case vec_promote_demote:
+      return COSTS_N_INSNS (1); /* CH convert_up/down.rt.  */
+    case vector_load:
+    case vector_store:
+      return COSTS_N_INSNS (1); /* CH masked_load/store.rt incl sparse.  */
+    case unaligned_load:
+    case unaligned_store:
+      return COSTS_N_INSNS (2); /* CH unpack.rt; E: store pair analogous.  */
+    case scalar_to_vec:
+    case vec_to_scalar:
+      /* CH spill_reload.lat = 12; E: exposed dependency cost of the memory
+         bridge, per-thread issue interval max(2,density), rounded up.
+         This deliberately differs from an independent spill's throughput.  */
+      return COSTS_N_INSNS (CEIL (12, MAX (2, knc_threads_per_core)));
+    default:
+      return -1;
+    }
+}
+
+bool
+ix86_knc_reduction_p (stmt_vec_info stmt)
+{
+  if (!stmt || !vect_is_reduction (stmt) || !is_gimple_assign (stmt->stmt))
+    return false;
+  tree type = TREE_TYPE (gimple_assign_lhs (stmt->stmt));
+  if (FLOAT_TYPE_P (type) && !flag_associative_math)
+    return false;
+  tree_code code = gimple_assign_rhs_code (stmt->stmt);
+  return code == PLUS_EXPR || code == MINUS_EXPR || code == MULT_EXPR;
+}
+
 /* These middle-end-only builtins use the low eight signed dwords of a
    V16SI index.  Keep their codes outside the shared x86 builtin tables.
    ADR-0008 point 6; Intel 327364-001 pp.297-299, 487-489, 533-535,
@@ -727,7 +882,7 @@ ix86_knc_zero_call_used_regs (HARD_REG_SET /* need_zeroed_hardregs */)
   return zeroed_hardregs;
 }
 
-/* KNC shares generic costs, but has no generic x86 arch macro.  */
+/* KNC has no generic x86 arch macro.  */
 enum processor_type
 ix86_knc_target_macros (cpp_reader *reader,
 			void (*def_or_undef) (cpp_reader *, const char *))
