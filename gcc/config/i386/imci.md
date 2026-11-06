@@ -162,26 +162,26 @@
 (define_mode_attr knc_narrow_bits [(V16QI "8") (V16HI "16")])
 (define_mode_attr knc_transport_bits [(V16QI "32") (V16HI "64")])
 
-(define_insn "*knc_transport_move<mode>"
-  [(set (match_operand:KNC_NARROW 0 "register_operand" "=YJ,YJ")
-        (match_operand:KNC_NARROW 1 "nonimmediate_operand" "YJ,Bm"))]
-  "TARGET_KNC && !misaligned_operand (operands[1], <MODE>mode)"
-  "@
-   vmovdqa32\t{%g1, %g0|%g0, %g1}
-   vbroadcasti<knc_transport_bits>x4\t{%1, %g0|%g0, %1}"
-  [(set_attr "type" "ssemov") (set_attr "mode" "XI")])
-
 ;; Intel 327364-001 pp.426-428: pack only the low two/four qwords.
 ;; Natural alignment guarantees that the entire value is in this line.
-;; Expose both scratches to LRA, including for moves inserted by reload.
-(define_insn_and_split "knc_transport_store<mode>"
-  [(set (match_operand:KNC_NARROW 0 "memory_operand" "=Bm")
-        (match_operand:KNC_NARROW 1 "register_operand" "YJ"))
-   (clobber (match_scratch:SI 2 "=&r"))
-   (clobber (match_scratch:HI 3 "=&YL"))]
-  "TARGET_KNC && !misaligned_operand (operands[0], <MODE>mode)"
-  "#"
-  "&& reload_completed"
+;; The same move must allow memory destinations when LRA spills a pseudo.
+;; A separate store pattern leaves the register-only move reloading its
+;; destination forever.  Expose the store scratches before allocation;
+;; register copies and loads need neither scratch.
+(define_insn_and_split "knc_transport_move<mode>"
+  [(set (match_operand:KNC_NARROW 0 "nonimmediate_operand" "=YJ,YJ,Bm")
+        (match_operand:KNC_NARROW 1 "nonimmediate_operand" "YJ,Bm,YJ"))
+   (clobber (match_scratch:SI 2 "=X,X,&r"))
+   (clobber (match_scratch:HI 3 "=X,X,&YL"))]
+  "TARGET_KNC
+   && !(MEM_P (operands[0]) && MEM_P (operands[1]))
+   && !misaligned_operand (operands[0], <MODE>mode)
+   && !misaligned_operand (operands[1], <MODE>mode)"
+  "@
+   vmovdqa32\t{%g1, %g0|%g0, %g1}
+   vbroadcasti<knc_transport_bits>x4\t{%1, %g0|%g0, %1}
+   #"
+  "&& reload_completed && MEM_P (operands[0])"
   [(const_int 0)]
 {
   emit_move_insn (operands[2], GEN_INT (<MODE>mode == V16QImode ? 3 : 15));
@@ -190,7 +190,7 @@
              (operands[0], operands[1], operands[3]));
   DONE;
 }
-  [(set_attr "type" "multi") (set_attr "mode" "XI")])
+  [(set_attr "type" "ssemov,ssemov,multi") (set_attr "mode" "XI")])
 
 (define_insn "knc_transport_maskstore<mode>"
   [(set (match_operand:KNC_NARROW 0 "memory_operand" "=Bm")
@@ -220,6 +220,16 @@
             (match_operand:KNC_NARROW 1 "memory_operand" "Bm"))))]
   "TARGET_KNC && !misaligned_operand (operands[1], <MODE>mode)"
   "vmovaps\t{%1%{<knc_extend_kind>int<knc_narrow_bits>%}, %g0|%g0, %1%{<knc_extend_kind>int<knc_narrow_bits>%}}"
+  [(set_attr "type" "ssecvt") (set_attr "mode" "XI")])
+
+;; simplify-rtx.cc canonicalizes FLOAT (SIGN_EXTEND x) to FLOAT x.
+;; Recognize that form too; all signed byte/word values are exact in SF.
+(define_insn "*knc_float<mode>v16sf2"
+  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
+        (float:V16SF
+          (match_operand:KNC_NARROW 1 "memory_operand" "Bm")))]
+  "TARGET_KNC && !misaligned_operand (operands[1], <MODE>mode)"
+  "vmovaps\t{%1%{sint<knc_narrow_bits>%}, %g0|%g0, %1%{sint<knc_narrow_bits>%}}"
   [(set_attr "type" "ssecvt") (set_attr "mode" "XI")])
 
 (define_insn_and_split "*knc_truncv16si<mode>2_store"

@@ -377,12 +377,10 @@ ix86_knc_expand_vector_move (machine_mode mode, rtx *operands)
 	  if (!store)
 	    emit_move_insn (operands[0], slot);
 	}
-      else if (MEM_P (operands[0]))
-	emit_insn (mode == V16QImode
-		   ? gen_knc_transport_storev16qi (operands[0], operands[1])
-		   : gen_knc_transport_storev16hi (operands[0], operands[1]));
       else
-	emit_insn (gen_rtx_SET (operands[0], operands[1]));
+	emit_insn (mode == V16QImode
+		   ? gen_knc_transport_movev16qi (operands[0], operands[1])
+		   : gen_knc_transport_movev16hi (operands[0], operands[1]));
       return;
     }
   if (mode == V4SFmode)
@@ -523,7 +521,7 @@ ix86_knc_expand_vector_init (rtx target, rtx vals)
   bool same = true;
   for (unsigned int i = 1; i < count; ++i)
     same &= rtx_equal_p (XVECEXP (vals, 0, 0), XVECEXP (vals, 0, i));
-  if (same)
+  if (same && ix86_knc_packed_mode_p (mode))
     {
       ix86_knc_expand_duplicate (target, XVECEXP (vals, 0, 0));
       return;
