@@ -766,7 +766,7 @@
   [(set (match_operand:KNC_GATHER16 0 "register_operand" "=&YJ")
         (unspec:KNC_GATHER16
           [(match_operand:KNC_GATHER16 1 "register_operand" "0")
-           (match_operand:HI 5 "register_operand" "7")
+           (match_operand:HI 7 "register_operand" "5")
            (match_operator:BLK 6 "vsib_mem_operator"
              [(unspec:DI
                 [(match_operand:DI 2 "register_operand" "r")
@@ -774,9 +774,9 @@
                  (match_operand:SI 4 "const1248_operand")]
                 UNSPEC_KNC_VSIBADDR)])]
           UNSPEC_KNC_GATHER))
-   (clobber (match_scratch:HI 7 "=&YL"))]
+   (clobber (match_scratch:HI 5 "=&YL"))]
   "TARGET_KNC"
-  ".Lknc_gather%=:\n\t<knc_gather_op>\t{(%2,%g3,%c4), %g0%{%7%}|%g0%{%7%}, [%2+%g3*%c4]}\n\tjknzd\t{.Lknc_gather%=, %7|%7, .Lknc_gather%=}"
+  ".Lknc_gather%=:\n\t<knc_gather_op>\t{(%2,%g3,%c4), %g0%{%5%}|%g0%{%5%}, [%2+%g3*%c4]}\n\tjknzd\t{.Lknc_gather%=, %5|%5, .Lknc_gather%=}"
   [(set_attr "type" "multi")
    (set_attr "memory" "load")
    (set_attr "length" "20")
@@ -788,15 +788,15 @@
              [(match_operand:DI 0 "register_operand" "r")
               (match_operand:V16SI 1 "register_operand" "YJ")
               (match_operand:SI 2 "const1248_operand")
-              (match_operand:HI 4 "register_operand" "6")]
+              (match_operand:HI 6 "register_operand" "4")]
              UNSPEC_KNC_VSIBADDR)])
         (unspec:BLK
           [(match_operand:KNC_GATHER16 3 "register_operand" "YJ")
-           (match_dup 4)]
+           (match_dup 6)]
           UNSPEC_KNC_SCATTER))
-   (clobber (match_scratch:HI 6 "=&YL"))]
+   (clobber (match_scratch:HI 4 "=&YL"))]
   "TARGET_KNC"
-  ".Lknc_scatter%=:\n\t<knc_scatter_op>\t{%g3, (%0,%g1,%c2)%{%6%}|[%0+%g1*%c2]%{%6%}, %g3}\n\tjknzd\t{.Lknc_scatter%=, %6|%6, .Lknc_scatter%=}"
+  ".Lknc_scatter%=:\n\t<knc_scatter_op>\t{%g3, (%0,%g1,%c2)%{%4%}|[%0+%g1*%c2]%{%4%}, %g3}\n\tjknzd\t{.Lknc_scatter%=, %4|%4, .Lknc_scatter%=}"
   [(set_attr "type" "multi")
    (set_attr "memory" "store")
    (set_attr "length" "20")
@@ -820,7 +820,8 @@
   rtx mem = gen_rtx_MEM (BLKmode, addr);
   rtx otherwise = force_reg (<MODE>mode, operands[6]);
   emit_insn (gen_knc_gather<mode> (operands[0], otherwise, operands[1],
-                                  operands[2], operands[4], operands[5], mem));
+                                  operands[2], operands[4], NULL_RTX, mem,
+                                  operands[5]));
   DONE;
 })
 
@@ -853,7 +854,7 @@
                             UNSPEC_KNC_VSIBADDR);
   rtx mem = gen_rtx_MEM (BLKmode, addr);
   emit_insn (gen_knc_scatter<mode> (operands[0], operands[1], operands[3],
-                                   operands[4], operands[5], mem));
+                                   operands[4], NULL_RTX, mem, operands[5]));
   DONE;
 })
 
