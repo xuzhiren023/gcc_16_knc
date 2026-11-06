@@ -19816,7 +19816,8 @@ ix86_gimple_fold_builtin (gimple_stmt_iterator *gsi)
   location_t loc;
 
   /* Don't fold when there's isa mismatch.  */
-  if (!ix86_check_builtin_isa_match (fn_code, NULL, NULL))
+  if ((TARGET_KNC && fn_code > IX86_BUILTIN_MAX)
+      || !ix86_check_builtin_isa_match (fn_code, NULL, NULL))
     return false;
 
   switch (fn_code)
@@ -20723,6 +20724,9 @@ static tree
 ix86_vectorize_builtin_scatter (const_tree vectype,
 				const_tree index_type, int scale)
 {
+  if (TARGET_KNC)
+    return ix86_knc_vectorize_builtin_scatter (vectype, index_type, scale);
+
   bool si;
   enum ix86_builtins code;
 

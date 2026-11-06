@@ -14670,6 +14670,11 @@ rtx
 ix86_expand_builtin (tree exp, rtx target, rtx subtarget,
 		     machine_mode mode, int ignore)
 {
+  if (TARGET_KNC
+      && DECL_MD_FUNCTION_CODE (TREE_OPERAND (CALL_EXPR_FN (exp), 0))
+	 > IX86_BUILTIN_MAX)
+    return ix86_knc_expand_builtin (exp, target);
+
   size_t i;
   enum insn_code icode, icode2;
   tree fndecl = TREE_OPERAND (CALL_EXPR_FN (exp), 0);

@@ -1532,6 +1532,9 @@ ix86_init_builtins (void)
 tree
 ix86_builtin_decl (unsigned code, bool)
 {
+  if (TARGET_KNC && code > IX86_BUILTIN_MAX)
+    return ix86_knc_builtin_decl (code);
+
   if (code >= IX86_BUILTIN_MAX)
     return error_mark_node;
 
@@ -1677,6 +1680,9 @@ tree
 ix86_vectorize_builtin_gather (const_tree mem_vectype,
 			       const_tree index_type, int scale)
 {
+  if (TARGET_KNC)
+    return ix86_knc_vectorize_builtin_gather (mem_vectype, index_type, scale);
+
   bool si;
   enum ix86_builtins code;
   const machine_mode mode = TYPE_MODE (TREE_TYPE (mem_vectype));
