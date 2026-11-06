@@ -18654,7 +18654,8 @@ quarter:
 void
 ix86_expand_vector_init (bool mmx_ok, rtx target, rtx vals)
 {
-  if (ix86_knc_packed_mode_p (GET_MODE (target)))
+  if (ix86_knc_packed_mode_p (GET_MODE (target))
+      || ix86_knc_transport_mode_p (GET_MODE (target)))
     return ix86_knc_expand_vector_init (target, vals);
   machine_mode mode = GET_MODE (target);
   machine_mode inner_mode = GET_MODE_INNER (mode);
