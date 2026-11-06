@@ -880,7 +880,7 @@ ix86_function_specific_restore (struct gcc_options *opts,
   opts->x_ix86_tune_memcpy_strategy = ptr->x_ix86_tune_memcpy_strategy;
   opts->x_ix86_tune_memset_strategy = ptr->x_ix86_tune_memset_strategy;
   opts->x_ix86_tune_no_default = ptr->x_ix86_tune_no_default;
-  ix86_tune_cost = processor_cost_table[ix86_tune];
+  ix86_tune_cost = ix86_knc_tune_cost (opts, processor_cost_table[ix86_tune]);
   /* TODO: ix86_cost should be chosen at instruction or function granuality
      so for cold code we use size_cost even in !optimize_size compilation.  */
   if (opts->x_optimize_size)
@@ -2539,7 +2539,7 @@ ix86_option_override_internal (bool main_args_p,
 
   ix86_override_options_after_change_1 (opts, opts_set);
 
-  ix86_tune_cost = processor_cost_table[ix86_tune];
+  ix86_tune_cost = ix86_knc_tune_cost (opts, processor_cost_table[ix86_tune]);
   /* TODO: ix86_cost should be chosen at instruction or function granuality
      so for cold code we use size_cost even in !optimize_size compilation.  */
   if (opts->x_optimize_size)
@@ -2843,6 +2843,12 @@ ix86_option_override_internal (bool main_args_p,
 		       ix86_tune_cost->l1_cache_size);
   SET_OPTION_IF_UNSET (opts, opts_set, param_l2_cache_size,
 		       ix86_tune_cost->l2_cache_size);
+
+  if (opts->x_ix86_tune_string
+      && !strcmp (opts->x_ix86_tune_string, "knc"))
+    /* Estimate one issue per cycle for the 360-cycle memory latency in
+       characterization point 8.  E5-07 will tune prefetch insertion.  */
+    SET_OPTION_IF_UNSET (opts, opts_set, param_prefetch_latency, 360);
 
   /* 64B is the accepted value for these for all x86.  */
   SET_OPTION_IF_UNSET (&global_options, &global_options_set,

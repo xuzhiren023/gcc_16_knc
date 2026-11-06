@@ -25,6 +25,10 @@ class _stmt_vec_info;
 struct _slp_tree;
 class vec_perm_indices;
 
+extern const struct processor_costs *ix86_knc_tune_cost
+  (const struct gcc_options *, const struct processor_costs *);
+extern int ix86_knc_stmt_cost (int, machine_mode, class _stmt_vec_info *);
+extern bool ix86_knc_reduction_p (class _stmt_vec_info *);
 extern bool ix86_knc_packed_mode_p (machine_mode);
 extern bool ix86_knc_transport_mode_p (machine_mode);
 extern opt_machine_mode ix86_knc_vectorize_related_mode (machine_mode,

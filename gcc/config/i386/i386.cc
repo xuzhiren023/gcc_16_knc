@@ -25676,6 +25676,12 @@ static int
 ix86_default_vector_cost (enum vect_cost_for_stmt type_of_cost,
 			  machine_mode mode)
 {
+  if (TARGET_KNC)
+    {
+      int cost = ix86_knc_stmt_cost (type_of_cost, mode, nullptr);
+      if (cost >= 0)
+        return cost;
+    }
   bool fp = FLOAT_MODE_P (mode);
   int index;
   switch (type_of_cost)
@@ -26580,6 +26586,14 @@ ix86_vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
 
 	case vector_stmt:
 	case vec_to_scalar:
+          /* KNC add/mul chains have the same four-cycle latency as FMA.
+             Reuse the existing reduction unroll calculation.  */
+          if (TARGET_KNC && kind == vector_stmt
+              && ix86_knc_reduction_p (stmt_info))
+            {
+              m_num_reduc[X86_REDUC_FMA] += count;
+              break;
+            }
 	  /* Count number of reduction FMA and "real" DOT_PROD_EXPR,
 	     unroll in the vectorizer will enable partial sum.  */
 	  if (stmt_info
@@ -26821,6 +26835,12 @@ ix86_vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
     }
   if (stmt_cost == -1)
     stmt_cost = ix86_default_vector_cost (kind, mode);
+  if (TARGET_KNC)
+    {
+      int cost = ix86_knc_stmt_cost (kind, mode, stmt_info);
+      if (cost >= 0)
+        stmt_cost = cost;
+    }
   /* ADR-0007 point 7: KNC masked accesses are 64-byte aligned only.  */
   if (TARGET_KNC && ix86_knc_packed_mode_p (mode)
       && (kind == unaligned_load || kind == unaligned_store)
