@@ -715,19 +715,20 @@
     }
   else
     {
-      rtx_vector_builder indices (mode, lanes, 1);
+      rtvec indices = rtvec_alloc (lanes);
       for (unsigned int i = 0; i < lanes; ++i)
 	if (FLOAT_MODE_P (mode))
 	  {
 	    REAL_VALUE_TYPE value;
 	    real_from_integer (&value, VOIDmode, i, UNSIGNED);
-	    indices.quick_push (const_double_from_real_value (value, inner));
+	    RTVEC_ELT (indices, i) = const_double_from_real_value (value, inner);
 	  }
 	else
-	  indices.quick_push (gen_int_mode (i, inner));
+	  RTVEC_ELT (indices, i) = gen_int_mode (i, inner);
       rtx step = gen_reg_rtx (mode);
       ix86_knc_expand_duplicate (step, operands[2]);
-      offsets = expand_simple_binop (mode, MULT, step, indices.build (),
+      offsets = expand_simple_binop (mode, MULT, step,
+				     gen_rtx_CONST_VECTOR (mode, indices),
 				     NULL_RTX, 0, OPTAB_DIRECT);
     }
   rtx result = expand_simple_binop (mode, PLUS, base, offsets, operands[0],
