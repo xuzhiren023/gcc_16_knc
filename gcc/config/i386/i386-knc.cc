@@ -85,7 +85,9 @@ ix86_knc_preferred_simd_mode (scalar_mode mode)
    not arbitrary byte, alignment.  Both SLP and loop vectorization call
    vect_supportable_dr_alignment, whose is_packed is not_size_aligned:
    get_object_alignment of the scalar reference must cover its size.
-   Unknown vector misalignment is therefore safe only when !is_packed.  */
+   Unknown vector misalignment is therefore safe only when !is_packed.
+   Gather/scatter lanes have the same element alignment requirement
+   (Intel 327364-001 p.26); their vector offsets need no line alignment.  */
 bool
 ix86_knc_support_vector_misalignment (machine_mode mode, int misalignment,
                                       bool is_packed, bool is_gather_scatter)
@@ -93,7 +95,7 @@ ix86_knc_support_vector_misalignment (machine_mode mode, int misalignment,
   if (!TARGET_KNC)
     return default_builtin_support_vector_misalignment
       (mode, misalignment, is_packed, is_gather_scatter);
-  if (!ix86_knc_packed_mode_p (mode) || is_packed || is_gather_scatter)
+  if (!ix86_knc_packed_mode_p (mode) || is_packed)
     return false;
   unsigned int bytes = GET_MODE_SIZE (GET_MODE_INNER (mode));
   return misalignment == -1
@@ -116,11 +118,15 @@ ix86_knc_masked_epilogue_p (loop_vec_info loop_vinfo)
     {
       dr_vec_info *dr_info = loop_vinfo->lookup_dr (dr);
       stmt_vec_info stmt_info = dr_info->stmt;
+
+      /* Gather/scatter references have no DR_STEP.  They cannot use this
+	 contiguous masked epilogue, so reject them before examining it.  */
+      if (STMT_VINFO_GATHER_SCATTER_P (stmt_info))
+	return false;
       if (!STMT_VINFO_RELEVANT_P (stmt_info) || integer_zerop (DR_STEP (dr)))
 	continue;
       tree vectype = STMT_VINFO_VECTYPE (stmt_info);
-      if (STMT_VINFO_GATHER_SCATTER_P (stmt_info)
-	  || STMT_VINFO_STRIDED_P (stmt_info)
+      if (STMT_VINFO_STRIDED_P (stmt_info)
 	  || STMT_VINFO_GROUPED_ACCESS (stmt_info)
 	  || TREE_CODE (DR_STEP (dr)) != INTEGER_CST
 	  || tree_int_cst_sgn (DR_STEP (dr)) < 0
