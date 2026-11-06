@@ -26938,6 +26938,8 @@ ix86_vector_costs::ix86_vect_estimate_reg_pressure ()
 void
 ix86_vector_costs::finish_cost (const vector_costs *scalar_costs)
 {
+  if (TARGET_KNC)
+    ix86_knc_report_loop (m_vinfo, m_costing_for_scalar);
   loop_vec_info loop_vinfo = dyn_cast<loop_vec_info> (m_vinfo);
   if (loop_vinfo && !m_costing_for_scalar)
     {
