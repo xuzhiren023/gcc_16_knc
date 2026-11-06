@@ -186,12 +186,22 @@ ix86_knc_packed_mode_p (machine_mode mode)
 	     || mode == V16SImode || mode == V8DImode);
 }
 
+/* ADR-0008 point 7: these modes transport sixteen narrow elements only.
+   Do not include them in packed_mode_p, which also enables arithmetic.  */
+bool
+ix86_knc_transport_mode_p (machine_mode mode)
+{
+  return TARGET_KNC && TARGET_64BIT
+	 && (mode == V16QImode || mode == V16HImode);
+}
+
 /* V4SF is only the shared SysV varargs save loop's 16-byte transport.
    It does not enable SSE arithmetic or change the packed storage modes.  */
 bool
 ix86_knc_vector_move_mode_p (machine_mode mode)
 {
   return ix86_knc_packed_mode_p (mode)
+	 || ix86_knc_transport_mode_p (mode)
 	 || (TARGET_KNC && TARGET_64BIT && mode == V4SFmode);
 }
 
@@ -202,12 +212,38 @@ ix86_knc_preferred_simd_mode (scalar_mode mode)
 {
   switch (mode)
     {
+    case E_QImode: return V16QImode;
+    case E_HImode: return V16HImode;
     case E_SFmode: return V16SFmode;
     case E_DFmode: return V8DFmode;
     case E_SImode: return V16SImode;
     case E_DImode: return V8DImode;
     default: return word_mode;
     }
+}
+
+/* Pair the narrow transport modes with sixteen dwords, preserving an
+   explicit lane count requested by the vectorizer.  Leave the existing
+   eight-lane width conversions and every non-KNC target unchanged.  */
+opt_machine_mode
+ix86_knc_vectorize_related_mode (machine_mode vector_mode,
+				scalar_mode element_mode, poly_uint64 nunits)
+{
+  if (TARGET_KNC && TARGET_64BIT
+      && (ix86_knc_transport_mode_p (vector_mode)
+	  || vector_mode == V16SImode || vector_mode == V16SFmode)
+      && (known_eq (nunits, 0U) || known_eq (nunits, 16U)))
+    {
+      switch (element_mode)
+	{
+	case E_QImode: return V16QImode;
+	case E_HImode: return V16HImode;
+	case E_SImode: return V16SImode;
+	case E_SFmode: return V16SFmode;
+	default: break;
+	}
+    }
+  return default_vectorize_related_mode (vector_mode, element_mode, nunits);
 }
 
 /* Intel 327364-001 VLOADUNPACKLD p.361: pairs accept element,
@@ -294,7 +330,8 @@ ix86_knc_unsupported_abi_type_p (const_tree type, machine_mode mode)
   switch (TREE_CODE (type))
     {
     case VECTOR_TYPE:
-      return mode == XImode || ix86_knc_packed_mode_p (mode);
+      return mode == XImode || ix86_knc_packed_mode_p (mode)
+	     || ix86_knc_transport_mode_p (mode);
     case ARRAY_TYPE:
       type = TREE_TYPE (type);
       return ix86_knc_unsupported_abi_type_p (type, TYPE_MODE (type));
@@ -317,6 +354,37 @@ ix86_knc_unsupported_abi_type_p (const_tree type, machine_mode mode)
 void
 ix86_knc_expand_vector_move (machine_mode mode, rtx *operands)
 {
+  if (ix86_knc_transport_mode_p (mode))
+    {
+      if (CONSTANT_P (operands[1]))
+	operands[1] = validize_mem (force_const_mem (mode, operands[1]));
+      if (MEM_P (operands[0]) && !REG_P (operands[1]))
+	operands[1] = force_reg (mode, operands[1]);
+      /* A language-level unaligned move still needs an exact-size copy.
+	 This does not provide movmisalign to the vectorizer.  */
+      rtx mem = MEM_P (operands[0]) ? operands[0] : operands[1];
+      if (MEM_P (mem) && misaligned_operand (mem, mode))
+	{
+	  gcc_assert (can_create_pseudo_p ());
+	  rtx slot = assign_stack_temp (mode, GET_MODE_SIZE (mode));
+	  bool store = MEM_P (operands[0]);
+	  if (store)
+	    emit_move_insn (slot, operands[1]);
+	  for (unsigned off = 0; off < GET_MODE_SIZE (mode); off += 8)
+	    emit_move_insn (adjust_address (store ? mem : slot, DImode, off),
+			   force_reg (DImode, adjust_address
+				      (store ? slot : mem, DImode, off)));
+	  if (!store)
+	    emit_move_insn (operands[0], slot);
+	}
+      else if (MEM_P (operands[0]))
+	emit_insn (mode == V16QImode
+		   ? gen_knc_transport_storev16qi (operands[0], operands[1])
+		   : gen_knc_transport_storev16hi (operands[0], operands[1]));
+      else
+	emit_insn (gen_rtx_SET (operands[0], operands[1]));
+      return;
+    }
   if (mode == V4SFmode)
     {
       /* Keep the donor's 16-byte save slots and TI transport (ADR-0004).
@@ -369,6 +437,27 @@ ix86_knc_expand_vector_move (machine_mode mode, rtx *operands)
 	  = replace_equiv_address (mem, force_reg (Pmode, addr));
     }
   emit_insn (gen_rtx_SET (operands[0], operands[1]));
+}
+
+/* The card confirms saturation (Intel 327364-001 pp.382-384).  An AND
+   before unsigned saturation gives C's low-bit truncation for both signed
+   and unsigned destinations.  Split after combine so the ordinary store
+   can absorb the truncate; a surviving register result uses a visible
+   exact-size stack transfer instead.  */
+void
+ix86_knc_expand_narrow_store (rtx dst, rtx src)
+{
+  machine_mode mode = GET_MODE (dst);
+  gcc_assert (ix86_knc_transport_mode_p (mode));
+  rtx mem = MEM_P (dst) ? dst
+	    : assign_stack_temp (mode, GET_MODE_SIZE (mode));
+  rtx mask = gen_const_vec_duplicate (V16SImode,
+				     GEN_INT (mode == V16QImode ? 255 : 65535));
+  rtx low = expand_simple_binop (V16SImode, AND, src, mask, NULL_RTX,
+				1, OPTAB_DIRECT);
+  emit_insn (gen_rtx_SET (mem, gen_rtx_US_TRUNCATE (mode, low)));
+  if (!MEM_P (dst))
+    emit_move_insn (dst, mem);
 }
 
 /* IMCI binary arithmetic has three operands, with an aligned memory
@@ -643,7 +732,8 @@ ix86_knc_hard_regno_mode_ok (unsigned int regno, machine_mode mode)
   if (MASK_REGNO_P (regno))
     return mode == HImode || mode == QImode;
   return knc_scalar_transport_mode_p (mode)
-         || ix86_knc_packed_mode_p (mode) || mode == XImode;
+	 || ix86_knc_packed_mode_p (mode)
+	 || ix86_knc_transport_mode_p (mode) || mode == XImode;
 }
 
 /* GCC 16 passes unstripped register or SUBREG operands here.  Keep the complete
