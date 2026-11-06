@@ -86,6 +86,73 @@
   [(set_attr "type" "ssecvt")
    (set_attr "mode" "XI")])
 
+;; Width conversions, ADR-0008 4/5; Intel 327364-001 pp.154-189.
+;; Only the expander copies enable KNC; x86 insn iterators stay unchanged.
+(define_mode_iterator VF2_512_256_KNC
+  [(V8DF "TARGET_AVX512F || TARGET_KNC") V4DF])
+(define_mode_iterator VF2_KNC
+  [(V8DF "TARGET_AVX512F || TARGET_KNC") (V4DF "TARGET_AVX") V2DF])
+
+(define_insn "*knc_vec_unpacks_lo_v16sf"
+  [(set (match_operand:V8DF 0 "register_operand" "=YJ")
+        (float_extend:V8DF
+          (vec_select:V8SF
+            (match_operand:V16SF 1 "nonimmediate_operand" "YJ")
+            (parallel [(const_int 0) (const_int 1) (const_int 2) (const_int 3)
+                       (const_int 4) (const_int 5) (const_int 6) (const_int 7)]))))]
+  "TARGET_KNC"
+  "vcvtps2pd\t{%g1, %g0|%g0, %g1}"
+  [(set_attr "type" "ssecvt") (set_attr "mode" "XI")])
+
+(define_insn "*knc_vec_unpacks_float_lo_v16si"
+  [(set (match_operand:V8DF 0 "register_operand" "=YJ")
+        (float:V8DF
+          (vec_select:V8SI
+            (match_operand:V16SI 1 "nonimmediate_operand" "YJ")
+            (parallel [(const_int 0) (const_int 1) (const_int 2) (const_int 3)
+                       (const_int 4) (const_int 5) (const_int 6) (const_int 7)]))))]
+  "TARGET_KNC"
+  "vcvtdq2pd\t{%g1, %g0|%g0, %g1}"
+  [(set_attr "type" "ssecvt") (set_attr "mode" "XI")])
+
+(define_insn "*knc_vec_unpacku_float_lo_v16si"
+  [(set (match_operand:V8DF 0 "register_operand" "=YJ")
+        (unsigned_float:V8DF
+          (vec_select:V8SI
+            (match_operand:V16SI 1 "nonimmediate_operand" "YJ")
+            (parallel [(const_int 0) (const_int 1) (const_int 2) (const_int 3)
+                       (const_int 4) (const_int 5) (const_int 6) (const_int 7)]))))]
+  "TARGET_KNC"
+  "vcvtudq2pd\t{%g1, %g0|%g0, %g1}"
+  [(set_attr "type" "ssecvt") (set_attr "mode" "XI")])
+
+(define_insn "knc_cvtpd2ps_lo"
+  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
+        (vec_concat:V16SF
+          (float_truncate:V8SF (match_operand:V8DF 1 "register_operand" "YJ"))
+          (match_operand:V8SF 2 "const0_operand" "C")))]
+  "TARGET_KNC"
+  "vcvtpd2ps\t{%g1, %g0|%g0, %g1}"
+  [(set_attr "type" "ssecvt") (set_attr "mode" "XI")])
+
+(define_insn "knc_cvtpd2dq_lo"
+  [(set (match_operand:V16SI 0 "register_operand" "=YJ")
+        (vec_concat:V16SI
+          (fix:V8SI (match_operand:V8DF 1 "register_operand" "YJ"))
+          (match_operand:V8SI 2 "const0_operand" "C")))]
+  "TARGET_KNC"
+  "vcvtfxpntpd2dq\t{$3, %g1, %g0|%g0, %g1, 3}"
+  [(set_attr "type" "ssecvt") (set_attr "mode" "XI")])
+
+(define_insn "knc_cvtpd2udq_lo"
+  [(set (match_operand:V16SI 0 "register_operand" "=YJ")
+        (vec_concat:V16SI
+          (unsigned_fix:V8SI (match_operand:V8DF 1 "register_operand" "YJ"))
+          (match_operand:V8SI 2 "const0_operand" "C")))]
+  "TARGET_KNC"
+  "vcvtfxpntpd2udq\t{$3, %g1, %g0|%g0, %g1, 3}"
+  [(set_attr "type" "ssecvt") (set_attr "mode" "XI")])
+
 (define_mode_iterator KNC_SCALAR [SF DF SI DI TI TF])
 (define_mode_iterator KNC_BROADCAST [SF DF SI DI])
 (define_mode_iterator KNC_PAIR [TI TF])
@@ -760,6 +827,22 @@
   [(set_attr "type" "sselog1")
    (set_attr "length_immediate" "1")
    (set_attr "mode" "XI")])
+
+;; The narrowing instructions zero their entire high half, even masked.
+;; Merge the second low half into the first using the S5-06 block permutation.
+(define_mode_iterator KNC_CVT_PACK [V16SF V16SI])
+(define_insn "@knc_cvt_merge<mode>"
+  [(set (match_operand:KNC_CVT_PACK 0 "register_operand" "=YJ")
+        (vec_merge:KNC_CVT_PACK
+          (unspec:KNC_CVT_PACK
+            [(match_operand:KNC_CVT_PACK 1 "register_operand" "YJ")
+             (match_operand:SI 2 "const_0_to_255_operand")]
+            UNSPEC_KNC_PERMF32X4)
+          (match_operand:KNC_CVT_PACK 3 "register_operand" "0")
+          (match_operand:HI 4 "register_operand" "YL")))]
+  "TARGET_KNC"
+  "vpermf32x4\t{%2, %g1, %g0%{%4%}|%g0%{%4%}, %g1, %2}"
+  [(set_attr "type" "sselog1") (set_attr "mode" "XI")])
 
 ;; VPSHUFD p.536: dword J of every 128-bit block is dword
 ;; (operand 2 >> 2J) & 3 of the same block of operand 1.

@@ -10662,7 +10662,7 @@
 		       (const_int 2) (const_int 3)
 		       (const_int 4) (const_int 5)
 		       (const_int 6) (const_int 7)]))))]
-  "TARGET_AVX512F"
+  "TARGET_AVX512F || (TARGET_KNC && ix86_knc_packed_mode_p (V16SFmode))"
   "vcvtps2pd\t{%t1, %0|%0, %t1}"
   [(set_attr "type" "ssecvt")
    (set_attr "prefix" "evex")
@@ -10868,8 +10868,15 @@
    (set (match_operand:V8DF 0 "register_operand")
 	(float_extend:V8DF
 	  (match_dup 2)))]
-"TARGET_AVX512F"
-"operands[2] = gen_reg_rtx (V8SFmode);")
+  "TARGET_AVX512F || TARGET_KNC"
+{
+  if (TARGET_KNC)
+    {
+      ix86_knc_expand_unpack (FLOAT_EXTEND, operands, true);
+      DONE;
+    }
+  operands[2] = gen_reg_rtx (V8SFmode);
+})
 
 (define_expand "vec_unpacks_lo_v4sf"
   [(set (match_operand:V2DF 0 "register_operand")
@@ -11006,8 +11013,15 @@
    (set (match_operand:V8DF 0 "register_operand")
 	(float:V8DF
 	  (match_dup 2)))]
-  "TARGET_AVX512F"
-  "operands[2] = gen_reg_rtx (V8SImode);")
+  "TARGET_AVX512F || TARGET_KNC"
+{
+  if (TARGET_KNC)
+    {
+      ix86_knc_expand_unpack (FLOAT, operands, true);
+      DONE;
+    }
+  operands[2] = gen_reg_rtx (V8SImode);
+})
 
 (define_expand "vec_unpacks_float_lo_v16si"
   [(set (match_operand:V8DF 0 "register_operand")
@@ -11018,7 +11032,7 @@
 		       (const_int 2) (const_int 3)
 		       (const_int 4) (const_int 5)
 		       (const_int 6) (const_int 7)]))))]
-  "TARGET_AVX512F")
+  "TARGET_AVX512F || TARGET_KNC")
 
 (define_expand "vec_unpacku_float_hi_v4si"
   [(set (match_dup 5)
@@ -11114,8 +11128,14 @@
 (define_expand "vec_unpacku_float_hi_v16si"
   [(match_operand:V8DF 0 "register_operand")
    (match_operand:V16SI 1 "register_operand")]
-  "TARGET_AVX512F"
+  "TARGET_AVX512F || TARGET_KNC"
 {
+  if (TARGET_KNC)
+    {
+      ix86_knc_expand_unpack (UNSIGNED_FLOAT, operands, true);
+      DONE;
+    }
+
   REAL_VALUE_TYPE TWO32r;
   rtx k, x, tmp[4];
 
@@ -11163,8 +11183,14 @@
 (define_expand "vec_unpacku_float_lo_v16si"
   [(match_operand:V8DF 0 "register_operand")
    (match_operand:V16SI 1 "nonimmediate_operand")]
-  "TARGET_AVX512F"
+  "TARGET_AVX512F || TARGET_KNC"
 {
+  if (TARGET_KNC)
+    {
+      ix86_knc_expand_unpack (UNSIGNED_FLOAT, operands, false);
+      DONE;
+    }
+
   REAL_VALUE_TYPE TWO32r;
   rtx k, x, tmp[3];
 
@@ -11186,16 +11212,22 @@
 (define_expand "vec_pack_trunc_<mode>"
   [(set (match_dup 3)
 	(float_truncate:<sf2dfmode>
-	  (match_operand:VF2_512_256 1 "nonimmediate_operand")))
+	  (match_operand:VF2_512_256_KNC 1 "nonimmediate_operand")))
    (set (match_dup 4)
 	(float_truncate:<sf2dfmode>
-	  (match_operand:VF2_512_256 2 "nonimmediate_operand")))
+	  (match_operand:VF2_512_256_KNC 2 "nonimmediate_operand")))
    (set (match_operand:<ssePSmode> 0 "register_operand")
 	(vec_concat:<ssePSmode>
 	  (match_dup 3)
 	  (match_dup 4)))]
-  "TARGET_AVX"
+  "TARGET_AVX || (TARGET_KNC && <MODE>mode == V8DFmode)"
 {
+  if (TARGET_KNC)
+    {
+      ix86_knc_expand_pack (FLOAT_TRUNCATE, operands);
+      DONE;
+    }
+
   operands[3] = gen_reg_rtx (<sf2dfmode>mode);
   operands[4] = gen_reg_rtx (<sf2dfmode>mode);
 })
@@ -11257,8 +11289,14 @@
   [(match_operand:V16SI 0 "register_operand")
    (match_operand:V8DF 1 "nonimmediate_operand")
    (match_operand:V8DF 2 "nonimmediate_operand")]
-  "TARGET_AVX512F"
+  "TARGET_AVX512F || TARGET_KNC"
 {
+  if (TARGET_KNC)
+    {
+      ix86_knc_expand_pack (FIX, operands);
+      DONE;
+    }
+
   rtx r1, r2;
 
   r1 = gen_reg_rtx (V8SImode);
@@ -11324,10 +11362,16 @@
 
 (define_expand "vec_pack_ufix_trunc_<mode>"
   [(match_operand:<ssepackfltmode> 0 "register_operand")
-   (match_operand:VF2 1 "register_operand")
-   (match_operand:VF2 2 "register_operand")]
-  "TARGET_SSE2"
+   (match_operand:VF2_KNC 1 "register_operand")
+   (match_operand:VF2_KNC 2 "register_operand")]
+  "TARGET_SSE2 || (TARGET_KNC && <MODE>mode == V8DFmode)"
 {
+  if (TARGET_KNC)
+    {
+      ix86_knc_expand_pack (UNSIGNED_FIX, operands);
+      DONE;
+    }
+
   if (<MODE>mode == V8DFmode)
     {
       rtx r1, r2;
