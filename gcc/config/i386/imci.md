@@ -1609,26 +1609,28 @@
 ;; even when reduc_fmin/fmax_scal is available for a whole vector.  Supply
 ;; SF/DF optabs too: broadcast each scalar, use the same quiet-NaN insn,
 ;; and extract lane zero.  All scalar/zmm transfers remain visible RTL.
-(define_mode_attr knc_fp_scalar_name [(V16SF "sf") (V8DF "df")])
-(define_expand "f<knc_fminmax><knc_fp_scalar_name>3"
-  [(set (match_operand:<knc_fp_scalar> 0 "register_operand")
-        (unspec:<knc_fp_scalar>
-          [(match_operand:<knc_fp_scalar> 1 "nonimmediate_operand")
-           (match_operand:<knc_fp_scalar> 2 "nonimmediate_operand")]
+(define_mode_iterator KNC_FP_SCALAR [SF DF])
+(define_mode_attr knc_fp_vector [(SF "V16SF") (DF "V8DF")])
+(define_mode_attr knc_fp_vector_name [(SF "v16sf") (DF "v8df")])
+(define_expand "f<knc_fminmax><mode>3"
+  [(set (match_operand:KNC_FP_SCALAR 0 "register_operand")
+        (unspec:KNC_FP_SCALAR
+          [(match_operand:KNC_FP_SCALAR 1 "nonimmediate_operand")
+           (match_operand:KNC_FP_SCALAR 2 "nonimmediate_operand")]
           KNC_FMINMAX))]
   "TARGET_KNC && !flag_signaling_nans"
 {
-  rtx a = gen_reg_rtx (<MODE>mode);
-  rtx b = gen_reg_rtx (<MODE>mode);
-  rtx result = gen_reg_rtx (<MODE>mode);
-  emit_insn (gen_vec_duplicate<mode> (a, operands[1]));
-  emit_insn (gen_vec_duplicate<mode> (b, operands[2]));
-  emit_insn (gen_f<knc_fminmax><mode>3 (result, a, b));
-  emit_move_insn (operands[0], gen_lowpart (<knc_fp_scalar>mode, result));
+  rtx a = gen_reg_rtx (<knc_fp_vector>mode);
+  rtx b = gen_reg_rtx (<knc_fp_vector>mode);
+  rtx result = gen_reg_rtx (<knc_fp_vector>mode);
+  emit_insn (gen_vec_duplicate<knc_fp_vector_name> (a, operands[1]));
+  emit_insn (gen_vec_duplicate<knc_fp_vector_name> (b, operands[2]));
+  emit_insn (gen_f<knc_fminmax><knc_fp_vector_name>3 (result, a, b));
+  emit_move_insn (operands[0], gen_lowpart (<MODE>mode, result));
   DONE;
 })
 
-
+(define_expand "reduc_f<knc_fminmax>_scal_<mode>"
   [(match_operand:<knc_fp_scalar> 0 "register_operand")
    (unspec:KNC_FP [(match_operand:KNC_FP 1 "register_operand")]
                   KNC_FMINMAX)]
