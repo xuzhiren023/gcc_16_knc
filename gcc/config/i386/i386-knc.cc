@@ -301,7 +301,7 @@ knc_masked_epilogue_rejection (loop_vec_info loop_vinfo)
       if (!vectype
 	  || dr_misalignment (dr_info, vectype) != 0
 	  || !known_eq (DR_TARGET_ALIGNMENT (dr_info), 64U))
-	return "misaligned masked access: not known 64-byte aligned";
+	return "misaligned masked access: alignment not known to be 64 bytes";
     }
   return nullptr;
 }
@@ -366,8 +366,9 @@ ix86_knc_report_loop (vec_info *vinfo, bool scalar_p)
 	  dump_printf_loc (info, vect_location,
 			   "KNC candidate access mode %s, factor = %wu\n",
 			   GET_MODE_NAME (TYPE_MODE (type)), vf);
-	  if (TYPE_PRECISION (TREE_TYPE (DR_REF (dr)))
-	      != TYPE_PRECISION (TREE_TYPE (type)))
+	  if (ix86_knc_transport_mode_p (TYPE_MODE (type))
+	      || TYPE_PRECISION (TREE_TYPE (DR_REF (dr)))
+		 != TYPE_PRECISION (TREE_TYPE (type)))
 	    converting++;
 	}
       gimple *call = stmt->stmt;
