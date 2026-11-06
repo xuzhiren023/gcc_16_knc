@@ -759,7 +759,8 @@
 (define_mode_iterator KNC_GATHER16 [V16SF V16SI])
 (define_mode_attr knc_gather_op [(V16SF "vgatherdps") (V16SI "vpgatherdd")])
 (define_mode_attr knc_scatter_op [(V16SF "vscatterdps") (V16SI "vpscatterdd")])
-(define_c_enum "unspec" [UNSPEC_KNC_GATHER UNSPEC_KNC_SCATTER])
+(define_c_enum "unspec"
+  [UNSPEC_KNC_GATHER UNSPEC_KNC_SCATTER UNSPEC_KNC_VSIBADDR])
 
 (define_insn "knc_gather<mode>"
   [(set (match_operand:KNC_GATHER16 0 "register_operand" "=&YJ")
@@ -771,11 +772,11 @@
                 [(match_operand:DI 2 "register_operand" "r")
                  (match_operand:V16SI 3 "register_operand" "YJ")
                  (match_operand:SI 4 "const1248_operand")]
-                UNSPEC_VSIBADDR)])]
+                UNSPEC_KNC_VSIBADDR)])]
           UNSPEC_KNC_GATHER))
    (clobber (match_scratch:HI 7 "=&YL"))]
   "TARGET_KNC"
-  ".Lknc_gather%=:\n\t<knc_gather_op>\t{%X6, %g0%{%7%}|%g0%{%7%}, %X6}\n\tjknzd\t{.Lknc_gather%=, %7|%7, .Lknc_gather%=}"
+  ".Lknc_gather%=:\n\t<knc_gather_op>\t{(%2,%g3,%c4), %g0%{%7%}|%g0%{%7%}, [%2+%g3*%c4]}\n\tjknzd\t{.Lknc_gather%=, %7|%7, .Lknc_gather%=}"
   [(set_attr "type" "multi")
    (set_attr "memory" "load")
    (set_attr "length" "20")
@@ -788,14 +789,14 @@
               (match_operand:V16SI 1 "register_operand" "YJ")
               (match_operand:SI 2 "const1248_operand")
               (match_operand:HI 4 "register_operand" "6")]
-             UNSPEC_VSIBADDR)])
+             UNSPEC_KNC_VSIBADDR)])
         (unspec:BLK
           [(match_operand:KNC_GATHER16 3 "register_operand" "YJ")
            (match_dup 4)]
           UNSPEC_KNC_SCATTER))
    (clobber (match_scratch:HI 6 "=&YL"))]
   "TARGET_KNC"
-  ".Lknc_scatter%=:\n\t<knc_scatter_op>\t{%g3, %X5%{%6%}|%X5%{%6%}, %g3}\n\tjknzd\t{.Lknc_scatter%=, %6|%6, .Lknc_scatter%=}"
+  ".Lknc_scatter%=:\n\t<knc_scatter_op>\t{%g3, (%0,%g1,%c2)%{%6%}|[%0+%g1*%c2]%{%6%}, %g3}\n\tjknzd\t{.Lknc_scatter%=, %6|%6, .Lknc_scatter%=}"
   [(set_attr "type" "multi")
    (set_attr "memory" "store")
    (set_attr "length" "20")
@@ -815,7 +816,7 @@
 {
   rtx addr = gen_rtx_UNSPEC (DImode,
                             gen_rtvec (3, operands[1], operands[2], operands[4]),
-                            UNSPEC_VSIBADDR);
+                            UNSPEC_KNC_VSIBADDR);
   rtx mem = gen_rtx_MEM (BLKmode, addr);
   rtx otherwise = force_reg (<MODE>mode, operands[6]);
   emit_insn (gen_knc_gather<mode> (operands[0], otherwise, operands[1],
@@ -849,7 +850,7 @@
   rtx addr = gen_rtx_UNSPEC (DImode,
                             gen_rtvec (4, operands[0], operands[1],
                                        operands[3], operands[5]),
-                            UNSPEC_VSIBADDR);
+                            UNSPEC_KNC_VSIBADDR);
   rtx mem = gen_rtx_MEM (BLKmode, addr);
   emit_insn (gen_knc_scatter<mode> (operands[0], operands[1], operands[3],
                                    operands[4], operands[5], mem));
