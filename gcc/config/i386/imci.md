@@ -677,6 +677,66 @@
 ;; must be element-aligned, like every IMCI memory operand.
 (define_mode_attr knc_packed_scalar
   [(V16SF "SF") (V8DF "DF") (V16SI "SI") (V8DI "DI")])
+
+;; VEC_SERIES_EXPR is base + lane * step (tree.def).  Keep initialization
+;; outside the vector loop, using ordinary moves and arithmetic so every
+;; broadcast, constant load and stack transfer remains visible to RTL.
+(define_expand "vec_series<mode>"
+  [(match_operand:KNC_PACKED 0 "register_operand")
+   (match_operand:<knc_packed_scalar> 1 "general_operand")
+   (match_operand:<knc_packed_scalar> 2 "general_operand")]
+  "TARGET_KNC"
+{
+  machine_mode mode = <MODE>mode;
+  scalar_mode inner = GET_MODE_INNER (mode);
+  unsigned int lanes = GET_MODE_NUNITS (mode);
+  rtx base = gen_reg_rtx (mode);
+  ix86_knc_expand_duplicate (base, operands[1]);
+  rtx offsets;
+  if (mode == V8DImode)
+    {
+      /* IMCI has no vpmullq.  Materialize the eight multiples with six
+	 scalar additions and an aligned slot, then use the existing carry
+	 sequence for the vector add.  No hidden helper or precision change.  */
+      rtx slot = assign_stack_temp (mode, GET_MODE_SIZE (mode));
+      rtx step = force_reg (inner, operands[2]);
+      rtx value = const0_rtx;
+      for (unsigned int i = 0; i < lanes; ++i)
+	{
+	  if (i == 1)
+	    value = step;
+	  else if (i > 1)
+	    value = expand_simple_binop (inner, PLUS, value, step, NULL_RTX,
+					1, OPTAB_DIRECT);
+	  emit_move_insn (adjust_address (slot, inner,
+					 i * GET_MODE_SIZE (inner)), value);
+	}
+      offsets = force_reg (mode, slot);
+    }
+  else
+    {
+      rtvec indices = rtvec_alloc (lanes);
+      for (unsigned int i = 0; i < lanes; ++i)
+	if (FLOAT_MODE_P (mode))
+	  {
+	    REAL_VALUE_TYPE value;
+	    real_from_integer (&value, VOIDmode, i, UNSIGNED);
+	    RTVEC_ELT (indices, i) = const_double_from_real_value (value, inner);
+	  }
+	else
+	  RTVEC_ELT (indices, i) = gen_int_mode (i, inner);
+      rtx step = gen_reg_rtx (mode);
+      ix86_knc_expand_duplicate (step, operands[2]);
+      offsets = expand_simple_binop (mode, MULT, step,
+				     gen_rtx_CONST_VECTOR (mode, indices),
+				     NULL_RTX, 0, OPTAB_DIRECT);
+    }
+  rtx result = expand_simple_binop (mode, PLUS, base, offsets, operands[0],
+				  0, OPTAB_DIRECT);
+  emit_move_insn (operands[0], result);
+  DONE;
+})
+
 (define_mode_attr knc_packed_broadcast
   [(V16SF "vbroadcastss") (V8DF "vbroadcastsd")
    (V16SI "vpbroadcastd") (V8DI "vpbroadcastq")])
