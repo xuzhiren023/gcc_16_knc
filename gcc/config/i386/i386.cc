@@ -21333,6 +21333,11 @@ ix86_callee_save_cost (spill_cost_type, unsigned int hard_regno, machine_mode,
 bool
 ix86_hardreg_mov_ok (rtx dst, rtx src)
 {
+  /* KNC kmov requires a register source.  Reject constant propagation into
+     allocated masks even when a pass checks recognition without constraints.  */
+  if (TARGET_KNC && MASK_REG_P (dst) && CONSTANT_P (src))
+    return false;
+
   /* Avoid complex sets of likely_spilled hard registers before reload.  */
   if (REG_P (dst) && HARD_REGISTER_P (dst)
       && !REG_P (src) && !MEM_P (src)
