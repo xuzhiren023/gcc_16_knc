@@ -991,13 +991,15 @@ ix86_knc_reduc_swizzle_p (rtx selector, machine_mode mode)
    V8DI PLUS uses S4-04's visible carry sequence.  Its operations are on
    dwords, so shuffle whole qwords first rather than swizzling the add.  */
 void
-ix86_knc_expand_reduc (enum rtx_code code, rtx dest, rtx src)
+ix86_knc_expand_reduc (enum rtx_code code, rtx dest, rtx src, bool number_p)
 {
   machine_mode mode = GET_MODE (src);
   unsigned int nelt = GET_MODE_NUNITS (mode);
   bool carry = mode == V8DImode && code == PLUS;
   gcc_assert (ix86_knc_packed_mode_p (mode));
   gcc_assert (code == PLUS
+              || ((mode == V16SFmode || mode == V8DFmode)
+                  && (code == SMIN || code == SMAX))
               || (mode == V16SImode
                   && (code == SMIN || code == SMAX
                       || code == UMIN || code == UMAX))
@@ -1028,6 +1030,11 @@ ix86_knc_expand_reduc (enum rtx_code code, rtx dest, rtx src)
       rtx result = gen_reg_rtx (mode);
       if (carry)
         emit_insn (gen_addv8di3 (result, src, other));
+      else if (number_p)
+        emit_insn (gen_rtx_SET (result,
+                   gen_rtx_UNSPEC (mode, gen_rtvec (2, src, other),
+                                   code == SMIN ? UNSPEC_KNC_FMIN
+                                                : UNSPEC_KNC_FMAX)));
       else
         emit_insn (gen_rtx_SET (result,
                                gen_rtx_fmt_ee (code, mode, src, other)));
