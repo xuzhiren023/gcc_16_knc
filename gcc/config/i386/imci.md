@@ -749,6 +749,127 @@
    (set_attr "memory" "none")
    (set_attr "length" "7")])
 
+;; ADR-0008 point 6; Intel 327364-001 pp.300-302, 484-486, 530-532,
+;; 598-600.  Each execution can complete only a subset of the lanes.
+;; Keep the retry loop in one insn, with a consumed non-k0 mask and a
+;; destination distinct from the index.  BLK memory with an opaque VSIB
+;; address describes the whole indexed footprint, not one scalar access.
+;; The card probe confirmed signed address-width scaling, masked fault
+;; suppression, restartability and highest-active-lane-wins scatter order.
+(define_mode_iterator KNC_GATHER16 [V16SF V16SI])
+(define_mode_attr knc_gather_op [(V16SF "vgatherdps") (V16SI "vpgatherdd")])
+(define_mode_attr knc_scatter_op [(V16SF "vscatterdps") (V16SI "vpscatterdd")])
+(define_c_enum "unspec" [UNSPEC_KNC_GATHER UNSPEC_KNC_SCATTER])
+
+(define_insn "knc_gather<mode>"
+  [(set (match_operand:KNC_GATHER16 0 "register_operand" "=&YJ")
+        (unspec:KNC_GATHER16
+          [(match_operand:KNC_GATHER16 1 "register_operand" "0")
+           (match_operand:HI 5 "register_operand" "7")
+           (match_operator:BLK 6 "vsib_mem_operator"
+             [(unspec:DI
+                [(match_operand:DI 2 "register_operand" "r")
+                 (match_operand:V16SI 3 "register_operand" "YJ")
+                 (match_operand:SI 4 "const1248_operand")]
+                UNSPEC_VSIBADDR)])]
+          UNSPEC_KNC_GATHER))
+   (clobber (match_scratch:HI 7 "=&YL"))]
+  "TARGET_KNC"
+  ".Lknc_gather%=:\n\t<knc_gather_op>\t{%X6, %g0%{%7%}|%g0%{%7%}, %X6}\n\tjknzd\t{.Lknc_gather%=, %7|%7, .Lknc_gather%=}"
+  [(set_attr "type" "multi")
+   (set_attr "memory" "load")
+   (set_attr "length" "20")
+   (set_attr "mode" "XI")])
+
+(define_insn "knc_scatter<mode>"
+  [(set (match_operator:BLK 5 "vsib_mem_operator"
+          [(unspec:DI
+             [(match_operand:DI 0 "register_operand" "r")
+              (match_operand:V16SI 1 "register_operand" "YJ")
+              (match_operand:SI 2 "const1248_operand")
+              (match_operand:HI 4 "register_operand" "6")]
+             UNSPEC_VSIBADDR)])
+        (unspec:BLK
+          [(match_operand:KNC_GATHER16 3 "register_operand" "YJ")
+           (match_dup 4)]
+          UNSPEC_KNC_SCATTER))
+   (clobber (match_scratch:HI 6 "=&YL"))]
+  "TARGET_KNC"
+  ".Lknc_scatter%=:\n\t<knc_scatter_op>\t{%g3, %X5%{%6%}|%X5%{%6%}, %g3}\n\tjknzd\t{.Lknc_scatter%=, %6|%6, .Lknc_scatter%=}"
+  [(set_attr "type" "multi")
+   (set_attr "memory" "store")
+   (set_attr "length" "20")
+   (set_attr "mode" "XI")])
+
+;; The optab sign and scale predicates are queried before expansion.
+;; In particular, unsigned dwords cannot be represented by IMCI VSIB.
+(define_expand "mask_gather_load<mode>v16si"
+  [(match_operand:KNC_GATHER16 0 "register_operand")
+   (match_operand:DI 1 "register_operand")
+   (match_operand:V16SI 2 "register_operand")
+   (match_operand:SI 3 "const0_operand")
+   (match_operand:SI 4 "const1248_operand")
+   (match_operand:HI 5 "register_operand")
+   (match_operand:KNC_GATHER16 6 "nonmemory_operand")]
+  "TARGET_KNC"
+{
+  rtx addr = gen_rtx_UNSPEC (DImode,
+                            gen_rtvec (3, operands[1], operands[2], operands[4]),
+                            UNSPEC_VSIBADDR);
+  rtx mem = gen_rtx_MEM (BLKmode, addr);
+  rtx otherwise = force_reg (<MODE>mode, operands[6]);
+  emit_insn (gen_knc_gather<mode> (operands[0], otherwise, operands[1],
+                                  operands[2], operands[4], operands[5], mem));
+  DONE;
+})
+
+(define_expand "gather_load<mode>v16si"
+  [(match_operand:KNC_GATHER16 0 "register_operand")
+   (match_operand:DI 1 "register_operand")
+   (match_operand:V16SI 2 "register_operand")
+   (match_operand:SI 3 "const0_operand")
+   (match_operand:SI 4 "const1248_operand")]
+  "TARGET_KNC"
+{
+  emit_insn (gen_mask_gather_load<mode>v16si
+    (operands[0], operands[1], operands[2], operands[3], operands[4],
+     force_reg (HImode, constm1_rtx), CONST0_RTX (<MODE>mode)));
+  DONE;
+})
+
+(define_expand "mask_scatter_store<mode>v16si"
+  [(match_operand:DI 0 "register_operand")
+   (match_operand:V16SI 1 "register_operand")
+   (match_operand:SI 2 "const0_operand")
+   (match_operand:SI 3 "const1248_operand")
+   (match_operand:KNC_GATHER16 4 "register_operand")
+   (match_operand:HI 5 "register_operand")]
+  "TARGET_KNC"
+{
+  rtx addr = gen_rtx_UNSPEC (DImode,
+                            gen_rtvec (4, operands[0], operands[1],
+                                       operands[3], operands[5]),
+                            UNSPEC_VSIBADDR);
+  rtx mem = gen_rtx_MEM (BLKmode, addr);
+  emit_insn (gen_knc_scatter<mode> (operands[0], operands[1], operands[3],
+                                   operands[4], operands[5], mem));
+  DONE;
+})
+
+(define_expand "scatter_store<mode>v16si"
+  [(match_operand:DI 0 "register_operand")
+   (match_operand:V16SI 1 "register_operand")
+   (match_operand:SI 2 "const0_operand")
+   (match_operand:SI 3 "const1248_operand")
+   (match_operand:KNC_GATHER16 4 "register_operand")]
+  "TARGET_KNC"
+{
+  emit_insn (gen_mask_scatter_store<mode>v16si
+    (operands[0], operands[1], operands[2], operands[3], operands[4],
+     force_reg (HImode, constm1_rtx)));
+  DONE;
+})
+
 ;; Intel 327364-001 VPERMD p.480: lane N takes dword (operand 2)[N] bits 3:0
 ;; of operand 1.  Only those four index bits are read, so a rotation index
 ;; needs no AND.  The 8-lane modes rotate by dword pairs.
