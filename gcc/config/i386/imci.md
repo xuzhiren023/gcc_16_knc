@@ -689,7 +689,7 @@
 {
   machine_mode mode = <MODE>mode;
   scalar_mode inner = GET_MODE_INNER (mode);
-  unsigned int lanes = GET_MODE_NUNITS (mode).to_constant ();
+  unsigned int lanes = GET_MODE_NUNITS (mode);
   rtx base = gen_reg_rtx (mode);
   ix86_knc_expand_duplicate (base, operands[1]);
   rtx offsets;
