@@ -118,11 +118,15 @@ ix86_knc_masked_epilogue_p (loop_vec_info loop_vinfo)
     {
       dr_vec_info *dr_info = loop_vinfo->lookup_dr (dr);
       stmt_vec_info stmt_info = dr_info->stmt;
+
+      /* Gather/scatter references have no DR_STEP.  They cannot use this
+	 contiguous masked epilogue, so reject them before examining it.  */
+      if (STMT_VINFO_GATHER_SCATTER_P (stmt_info))
+	return false;
       if (!STMT_VINFO_RELEVANT_P (stmt_info) || integer_zerop (DR_STEP (dr)))
 	continue;
       tree vectype = STMT_VINFO_VECTYPE (stmt_info);
-      if (STMT_VINFO_GATHER_SCATTER_P (stmt_info)
-	  || STMT_VINFO_STRIDED_P (stmt_info)
+      if (STMT_VINFO_STRIDED_P (stmt_info)
 	  || STMT_VINFO_GROUPED_ACCESS (stmt_info)
 	  || TREE_CODE (DR_STEP (dr)) != INTEGER_CST
 	  || tree_int_cst_sgn (DR_STEP (dr)) < 0
