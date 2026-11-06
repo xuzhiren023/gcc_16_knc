@@ -4417,6 +4417,7 @@ ix86_function_value_1 (const_tree valtype, const_tree fntype_or_decl,
 static rtx
 ix86_function_value (const_tree valtype, const_tree fntype_or_decl, bool)
 {
+  if (TARGET_KNC && ix86_knc_gather_type_p (fntype_or_decl)) return gen_rtx_REG (TYPE_MODE (valtype), FIRST_SSE_REG);
   machine_mode mode, orig_mode;
 
   orig_mode = TYPE_MODE (valtype);
