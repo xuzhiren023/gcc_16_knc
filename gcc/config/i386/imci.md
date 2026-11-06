@@ -1433,7 +1433,7 @@
   [(set_attr "type" "sseadd") (set_attr "mode" "<MODE>")])
 
 (define_expand "reduc_f<knc_fminmax>_scal_<mode>"
-  [(match_operand:<ssescalarmode> 0 "register_operand")
+  [(match_operand:<knc_fp_scalar> 0 "register_operand")
    (unspec:KNC_FP [(match_operand:KNC_FP 1 "register_operand")]
                   KNC_FMINMAX)]
   "TARGET_KNC && !flag_signaling_nans"
