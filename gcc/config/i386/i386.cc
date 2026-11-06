@@ -26273,6 +26273,18 @@ ix86_vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
 				  tree vectype, int,
 				  vect_cost_model_location where)
 {
+  /* Legacy gather/scatter records one scalar access per lane in
+     tree-vect-stmts.cc.  Charge each vector instruction only on the vector
+     side; emulated accesses and the scalar baseline retain scalar costs.  */
+  if (TARGET_KNC && !m_costing_for_scalar && node
+      && SLP_TREE_MEMORY_ACCESS_TYPE (node) == VMAT_GATHER_SCATTER_LEGACY
+      && (kind == scalar_load || kind == scalar_store))
+    {
+      unsigned lanes = TYPE_VECTOR_SUBPARTS (vectype).to_constant ();
+      gcc_assert (count % lanes == 0);
+      count /= lanes;
+      kind = kind == scalar_load ? vector_gather_load : vector_scatter_store;
+    }
   if (TARGET_KNC && ix86_knc_sqrt_stmt_p (kind, stmt_info, vectype))
     {
       unsigned cost = adjust_cost_for_freq (stmt_info, where, count
@@ -26835,7 +26847,10 @@ ix86_vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
     }
   if (stmt_cost == -1)
     stmt_cost = ix86_default_vector_cost (kind, mode);
-  if (TARGET_KNC)
+  /* Only gather/scatter needs statement-specific KNC costs here.  Other
+     KNC defaults have already received the x86 lowering adjustments.  */
+  if (TARGET_KNC
+      && (kind == vector_gather_load || kind == vector_scatter_store))
     {
       int cost = ix86_knc_stmt_cost (kind, mode, stmt_info);
       if (cost >= 0)

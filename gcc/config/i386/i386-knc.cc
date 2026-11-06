@@ -159,7 +159,8 @@ ix86_knc_stmt_cost (int kind, machine_mode mode, stmt_vec_info stmt)
         if (stmt && STMT_VINFO_DR_INFO (stmt))
           {
             tree step = DR_STEP (STMT_VINFO_DR_INFO (stmt)->dr);
-            if (step && tree_fits_shwi_p (step))
+            /* A zero step represents unknown gather indices, not a stride.  */
+            if (step && !integer_zerop (step) && tree_fits_shwi_p (step))
               {
                 HOST_WIDE_INT stride = tree_to_shwi (step);
                 /* Avoid overflow; strides of at least a line touch LANES.  */
