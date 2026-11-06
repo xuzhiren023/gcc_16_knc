@@ -26,6 +26,10 @@ struct _slp_tree;
 class vec_perm_indices;
 
 extern bool ix86_knc_packed_mode_p (machine_mode);
+extern bool ix86_knc_transport_mode_p (machine_mode);
+extern opt_machine_mode ix86_knc_vectorize_related_mode (machine_mode,
+							scalar_mode, poly_uint64);
+extern void ix86_knc_expand_narrow_store (rtx, rtx);
 extern bool ix86_knc_vector_move_mode_p (machine_mode);
 extern machine_mode ix86_knc_preferred_simd_mode (scalar_mode);
 extern bool ix86_knc_support_vector_misalignment (machine_mode, int, bool, bool);

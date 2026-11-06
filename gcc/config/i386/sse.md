@@ -15460,7 +15460,7 @@
   [(set (match_operand:PMOV_DST_MODE_1 0 "nonimmediate_operand")
 	(truncate:PMOV_DST_MODE_1
 	  (match_operand:<pmov_src_mode> 1 "register_operand")))]
-  "TARGET_AVX512F")
+  "TARGET_AVX512F || ix86_knc_transport_mode_p (<MODE>mode)")
 
 (define_insn "*avx512f_<code><pmov_src_lower><mode>2"
   [(set (match_operand:PMOV_DST_MODE_1 0 "nonimmediate_operand" "=v,m")
@@ -24998,7 +24998,7 @@
   [(set (match_operand:V16SI 0 "register_operand")
 	(any_extend:V16SI
 	  (match_operand:V16QI 1 "nonimmediate_operand")))]
-  "TARGET_AVX512F")
+  "TARGET_AVX512F || ix86_knc_transport_mode_p (V16QImode)")
 
 (define_insn "avx2_<code>v8qiv8si2<mask_name>"
   [(set (match_operand:V8SI 0 "register_operand" "=v")
@@ -25202,7 +25202,7 @@
   [(set (match_operand:V16SI 0 "register_operand")
 	(any_extend:V16SI
 	  (match_operand:V16HI 1 "nonimmediate_operand")))]
-  "TARGET_AVX512F")
+  "TARGET_AVX512F || ix86_knc_transport_mode_p (V16HImode)")
 
 (define_insn_and_split "avx512f_zero_extendv16hiv16si2_1"
   [(set (match_operand:V32HI 0 "register_operand" "=v")
@@ -29865,7 +29865,7 @@
 ;; Modes handled by vec_init expanders.
 (define_mode_iterator VEC_INIT_MODE
   [(V64QI "TARGET_AVX512F") (V32QI "TARGET_AVX") V16QI
-   (V32HI "TARGET_AVX512F") (V16HI "TARGET_AVX") V8HI
+   (V32HI "TARGET_AVX512F") (V16HI "TARGET_AVX || TARGET_KNC") V8HI
    (V16SI "TARGET_AVX512F || TARGET_KNC") (V8SI "TARGET_AVX") V4SI
    (V8DI "TARGET_AVX512F || TARGET_KNC") (V4DI "TARGET_AVX") V2DI
    (V32HF "TARGET_AVX512F") (V16HF "TARGET_AVX") V8HF

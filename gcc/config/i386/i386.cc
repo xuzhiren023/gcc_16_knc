@@ -25130,7 +25130,7 @@ static bool
 ix86_vector_mode_supported_p (machine_mode mode)
 {
   if (TARGET_KNC)
-    return ix86_knc_packed_mode_p (mode);
+    return ix86_knc_packed_mode_p (mode) || ix86_knc_transport_mode_p (mode);
   /* For ia32, scalar TImode isn't supported and so V1TImode shouldn't be
      either.  */
   if (!TARGET_64BIT && GET_MODE_INNER (mode) == TImode)
@@ -28675,6 +28675,8 @@ ix86_libgcc_floating_mode_supported_p
 #undef TARGET_VECTORIZE_PREFERRED_SIMD_MODE
 #define TARGET_VECTORIZE_PREFERRED_SIMD_MODE \
   ix86_preferred_simd_mode
+#undef TARGET_VECTORIZE_RELATED_MODE
+#define TARGET_VECTORIZE_RELATED_MODE ix86_knc_vectorize_related_mode
 #undef TARGET_VECTORIZE_SPLIT_REDUCTION
 #define TARGET_VECTORIZE_SPLIT_REDUCTION \
   ix86_split_reduction
