@@ -1406,13 +1406,14 @@
 ;; NaN returns the number; two quiet NaNs return a quiet NaN.  Signaling
 ;; NaNs are not quietened, so the C fmin/fmax optabs exclude that mode.
 ;; RTL smin/smax permit either operand for NaNs and signed zeros.
-(define_insn "*knc_<maxmin><mode>3"
+(define_code_attr knc_maxmin [(smax "max") (smin "min")])
+(define_insn "*knc_<knc_maxmin><mode>3"
   [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
         (smaxmin:KNC_FP
           (match_operand:KNC_FP 1 "register_operand" "%YJ")
           (match_operand:KNC_FP 2 "register_operand" "YJ")))]
   "TARGET_KNC"
-  "vg<maxmin><knc_fp_suffix>\t{%g2, %g1, %g0|%g0, %g1, %g2}"
+  "vg<knc_maxmin><knc_fp_suffix>\t{%g2, %g1, %g0|%g0, %g1, %g2}"
   [(set_attr "type" "sseadd") (set_attr "mode" "<MODE>")])
 
 (define_c_enum "unspec" [UNSPEC_KNC_FMIN UNSPEC_KNC_FMAX])
@@ -1442,7 +1443,7 @@
   DONE;
 })
 
-(define_insn "*knc_reduc_<maxmin><mode>_swizzle"
+(define_insn "*knc_reduc_<knc_maxmin><mode>_swizzle"
   [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
         (smaxmin:KNC_FP
           (match_operand:KNC_FP 1 "register_operand" "YJ")
@@ -1453,8 +1454,8 @@
   "TARGET_KNC && ix86_knc_reduc_swizzle_p (operands[3], <MODE>mode)"
 {
   if (INTVAL (operands[4]) == 1)
-    return "vg<maxmin><knc_fp_suffix>\t{%g2%{cdab%}, %g1, %g0|%g0, %g1, %g2%{cdab%}}";
-  return "vg<maxmin><knc_fp_suffix>\t{%g2%{badc%}, %g1, %g0|%g0, %g1, %g2%{badc%}}";
+    return "vg<knc_maxmin><knc_fp_suffix>\t{%g2%{cdab%}, %g1, %g0|%g0, %g1, %g2%{cdab%}}";
+  return "vg<knc_maxmin><knc_fp_suffix>\t{%g2%{badc%}, %g1, %g0|%g0, %g1, %g2%{badc%}}";
 }
   [(set_attr "type" "sseadd") (set_attr "mode" "<MODE>")])
 
