@@ -99,8 +99,10 @@ ix86_knc_builtin_decl (unsigned code)
    A user function with the same signature still has the ordinary KNC ABI
    and must not inherit this exemption through a canonical function type.  */
 bool
-ix86_knc_gather_type_p (const_tree fntype)
+ix86_knc_gather_type_p (const_tree fntype_or_decl)
 {
+  const_tree fntype = fntype_or_decl && DECL_P (fntype_or_decl)
+    ? TREE_TYPE (fntype_or_decl) : fntype_or_decl;
   return fntype
     && ((knc_indexed_decls[0]
          && fntype == TREE_TYPE (knc_indexed_decls[0]))
