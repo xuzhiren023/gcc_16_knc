@@ -26273,11 +26273,12 @@ ix86_vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
 				  tree vectype, int,
 				  vect_cost_model_location where)
 {
-  /* Legacy gather/scatter records one scalar access per lane in
+  /* Native IFN and legacy gather/scatter record one scalar access per lane in
      tree-vect-stmts.cc.  Charge each vector instruction only on the vector
      side; emulated accesses and the scalar baseline retain scalar costs.  */
   if (TARGET_KNC && !m_costing_for_scalar && node
-      && SLP_TREE_MEMORY_ACCESS_TYPE (node) == VMAT_GATHER_SCATTER_LEGACY
+      && (SLP_TREE_MEMORY_ACCESS_TYPE (node) == VMAT_GATHER_SCATTER_LEGACY
+          || SLP_TREE_MEMORY_ACCESS_TYPE (node) == VMAT_GATHER_SCATTER_IFN)
       && (kind == scalar_load || kind == scalar_store))
     {
       unsigned lanes = TYPE_VECTOR_SUBPARTS (vectype).to_constant ();
