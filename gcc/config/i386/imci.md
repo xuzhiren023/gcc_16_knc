@@ -1605,7 +1605,30 @@
   "vg<knc_fminmax><knc_fp_suffix>\t{%g2, %g1, %g0|%g0, %g1, %g2}"
   [(set_attr "type" "sseadd") (set_attr "mode" "<MODE>")])
 
-(define_expand "reduc_f<knc_fminmax>_scal_<mode>"
+;; S6-11: SLP reductions can finish with scalar IFN_FMIN/IFN_FMAX,
+;; even when reduc_fmin/fmax_scal is available for a whole vector.  Supply
+;; SF/DF optabs too: broadcast each scalar, use the same quiet-NaN insn,
+;; and extract lane zero.  All scalar/zmm transfers remain visible RTL.
+(define_mode_attr knc_fp_scalar_name [(V16SF "sf") (V8DF "df")])
+(define_expand "f<knc_fminmax><knc_fp_scalar_name>3"
+  [(set (match_operand:<knc_fp_scalar> 0 "register_operand")
+        (unspec:<knc_fp_scalar>
+          [(match_operand:<knc_fp_scalar> 1 "nonimmediate_operand")
+           (match_operand:<knc_fp_scalar> 2 "nonimmediate_operand")]
+          KNC_FMINMAX))]
+  "TARGET_KNC && !flag_signaling_nans"
+{
+  rtx a = gen_reg_rtx (<MODE>mode);
+  rtx b = gen_reg_rtx (<MODE>mode);
+  rtx result = gen_reg_rtx (<MODE>mode);
+  emit_insn (gen_vec_duplicate<mode> (a, operands[1]));
+  emit_insn (gen_vec_duplicate<mode> (b, operands[2]));
+  emit_insn (gen_f<knc_fminmax><mode>3 (result, a, b));
+  emit_move_insn (operands[0], gen_lowpart (<knc_fp_scalar>mode, result));
+  DONE;
+})
+
+
   [(match_operand:<knc_fp_scalar> 0 "register_operand")
    (unspec:KNC_FP [(match_operand:KNC_FP 1 "register_operand")]
                   KNC_FMINMAX)]
