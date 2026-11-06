@@ -2257,7 +2257,11 @@ classify_argument (machine_mode mode, const_tree type,
 		   enum x86_64_reg_class classes[MAX_CLASSES], int bit_offset,
 		   int &zero_width_bitfields)
 {
-  if (TARGET_KNC && !ix86_knc_check_abi_type (type, mode))
+  /* Preserve the donor's BLKmode ABI for 32-byte short vectors, now
+     represented by a supported transport mode.  This classifier serves
+     both arguments (including va_arg) and results.  */
+  if (TARGET_KNC
+      && (!ix86_knc_check_abi_type (type, mode) || mode == V16HImode))
     return 0;
 
   HOST_WIDE_INT bytes

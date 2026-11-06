@@ -330,6 +330,10 @@ ix86_knc_unsupported_abi_type_p (const_tree type, machine_mode mode)
   switch (TREE_CODE (type))
     {
     case VECTOR_TYPE:
+      /* GCC 5 passed 32-byte short vectors in memory as BLKmode.  The
+         V16HI transport mode must not change that existing ABI.  */
+      if (mode == V16HImode)
+        return false;
       return mode == XImode || ix86_knc_packed_mode_p (mode)
 	     || ix86_knc_transport_mode_p (mode);
     case ARRAY_TYPE:
@@ -360,6 +364,10 @@ ix86_knc_expand_vector_move (machine_mode mode, rtx *operands)
 	operands[1] = validize_mem (force_const_mem (mode, operands[1]));
       if (MEM_P (operands[0]) && !REG_P (operands[1]))
 	operands[1] = force_reg (mode, operands[1]);
+      /* Like ix86_expand_vector_move, expose the stack adjustment before
+         a vector argument store.  Transport patterns cannot use PRE_DEC.  */
+      if (mode == V16HImode && push_operand (operands[0], VOIDmode))
+	operands[0] = emit_move_resolve_push (mode, operands[0]);
       /* A language-level unaligned move still needs an exact-size copy.
 	 This does not provide movmisalign to the vectorizer.  */
       rtx mem = MEM_P (operands[0]) ? operands[0] : operands[1];
