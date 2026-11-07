@@ -605,7 +605,9 @@ ia32_multipass_dfa_lookahead (void)
 bool
 ix86_macro_fusion_p ()
 {
-  return TARGET_FUSE_CMP_AND_BRANCH;
+  /* KNC pairs two instructions; it does not fuse an ALU operation with a
+     branch.  Grouping them would strand scalar work at the loop tail.  */
+  return ix86_schedule != CPU_KNC && TARGET_FUSE_CMP_AND_BRANCH;
 }
 
 /* Check whether MOV is a reg-reg move and ALU is an

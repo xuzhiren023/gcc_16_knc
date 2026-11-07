@@ -18510,7 +18510,7 @@ ix86_sched_init_global (FILE *, int, int)
     case PROCESSOR_GENERIC:
       /* Do not perform multipass scheduling for pre-reload schedule
          to save compile time.  */
-      if (reload_completed)
+      if (reload_completed && ix86_schedule != CPU_KNC)
 	{
 	  ix86_core2i7_init_hooks ();
 	  break;
