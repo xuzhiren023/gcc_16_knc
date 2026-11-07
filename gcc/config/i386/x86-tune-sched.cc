@@ -39,6 +39,9 @@ along with GCC; see the file COPYING3.  If not see
 int
 ix86_issue_rate (void)
 {
+  if (ix86_schedule == CPU_KNC)
+    return 2;
+
   switch (ix86_tune)
     {
     case PROCESSOR_PENTIUM:
@@ -297,6 +300,16 @@ ix86_adjust_cost (rtx_insn *insn, int dep_type, rtx_insn *dep_insn, int cost,
   /* If we can't recognize the insns, we can't really do anything.  */
   if (dep_insn_code_number < 0 || recog_memoized (insn) < 0)
     return cost;
+
+  if (ix86_schedule == CPU_KNC)
+    {
+      /* S6-03: an address dependence adds one core cycle, hidden at four
+         threads.  Convert core latency to this thread's issue slots only
+         after adding the interlock, so there is no double rounding.  */
+      if (ix86_agi_dependent (dep_insn, insn))
+        cost++;
+      return CEIL (cost, MAX (2, knc_threads_per_core));
+    }
 
   insn_type = get_attr_type (insn);
   dep_insn_type = get_attr_type (dep_insn);
