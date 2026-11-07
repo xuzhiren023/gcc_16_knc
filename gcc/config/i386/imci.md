@@ -147,7 +147,8 @@
           (match_operand:V8SI 2 "const0_operand" "C")))]
   "TARGET_KNC"
   "vcvtfxpntpd2dq\t{$3, %g1, %g0|%g0, %g1, 3}"
-  [(set_attr "type" "ssecvt") (set_attr "mode" "XI")])
+  [(set_attr "knc_special" "convert_df")
+   (set_attr "type" "ssecvt") (set_attr "mode" "XI")])
 
 (define_insn "knc_cvtpd2udq_lo"
   [(set (match_operand:V16SI 0 "register_operand" "=YJ")
@@ -156,7 +157,8 @@
           (match_operand:V8SI 2 "const0_operand" "C")))]
   "TARGET_KNC"
   "vcvtfxpntpd2udq\t{$3, %g1, %g0|%g0, %g1, 3}"
-  [(set_attr "type" "ssecvt") (set_attr "mode" "XI")])
+  [(set_attr "knc_special" "convert_df")
+   (set_attr "type" "ssecvt") (set_attr "mode" "XI")])
 
 ;; ADR-0008 point 7, including the S5-16 transport-width amendment.
 ;; Intel 327364-001 pp.136-139: these broadcasts read exactly 16/32 bytes.
@@ -569,7 +571,8 @@
   operands[2] = adjust_address (operands[1], <MODE>mode, 64);
   return "vloadunpackl<knc_packed_pair>\t%1, %g0\n\tvloadunpackh<knc_packed_pair>\t%2, %g0";
 }
-  [(set_attr "type" "multi")
+  [(set_attr "knc_special" "pair")
+   (set_attr "type" "multi")
    (set_attr "memory" "load")
    (set_attr "length" "24")
    (set_attr "mode" "XI")])
@@ -583,7 +586,8 @@
   operands[2] = adjust_address (operands[0], <MODE>mode, 64);
   return "vpackstorel<knc_packed_pair>\t%g1, %0\n\tvpackstoreh<knc_packed_pair>\t%g1, %2";
 }
-  [(set_attr "type" "multi")
+  [(set_attr "knc_special" "pair")
+   (set_attr "type" "multi")
    (set_attr "memory" "store")
    (set_attr "length" "24")
    (set_attr "mode" "XI")])
@@ -770,7 +774,8 @@
                        UNSPEC_KNC_BROADCAST_BLOCK))]
   "TARGET_KNC"
   "vpermf32x4\t$0, %g1, %g0"
-  [(set_attr "type" "sselog1") (set_attr "mode" "<MODE>")])
+  [(set_attr "knc_special" "permute")
+   (set_attr "type" "sselog1") (set_attr "mode" "<MODE>")])
 
 ;; Explicit selects describe the real swizzle groups, not a fictitious
 ;; full-vector register broadcast.  Intel 327364-001 tables 2.2 and 2.3.
@@ -783,7 +788,8 @@
                      (const_int 12) (const_int 12) (const_int 12) (const_int 12)])))]
   "TARGET_KNC"
   "vmovaps\t%g1%{aaaa%}, %g0"
-  [(set_attr "type" "sselog1") (set_attr "mode" "V16SF")])
+  [(set_attr "knc_special" "permute")
+   (set_attr "type" "sselog1") (set_attr "mode" "V16SF")])
 
 (define_insn "knc_broadcast_swizzlev8df"
   [(set (match_operand:V8DF 0 "register_operand" "=YJ")
@@ -792,7 +798,8 @@
                      (const_int 4) (const_int 4) (const_int 4) (const_int 4)])))]
   "TARGET_KNC"
   "vmovapd\t%g1%{aaaa%}, %g0"
-  [(set_attr "type" "sselog1") (set_attr "mode" "V8DF")])
+  [(set_attr "knc_special" "permute")
+   (set_attr "type" "sselog1") (set_attr "mode" "V8DF")])
 
 ;; Compares into k masks (ADR-0007 points 1, 2, 3 and 5).
 ;; The shared vec_cmp expander passes its comparison through this predicate.
@@ -954,7 +961,8 @@
    (clobber (match_scratch:HI 5 "=&YL"))]
   "TARGET_KNC"
   ".Lknc_gather%=:\n\t<knc_gather_op>\t{(%2,%g3,%c4), %g0%{%5%}|%g0%{%5%}, [%2+%g3*%c4]}\n\tjknzd\t{.Lknc_gather%=, %5|%5, .Lknc_gather%=}"
-  [(set_attr "type" "multi")
+  [(set_attr "knc_special" "gather")
+   (set_attr "type" "multi")
    (set_attr "memory" "load")
    (set_attr "length" "20")
    (set_attr "mode" "XI")])
@@ -974,7 +982,8 @@
    (clobber (match_scratch:HI 4 "=&YL"))]
   "TARGET_KNC"
   ".Lknc_scatter%=:\n\t<knc_scatter_op>\t{%g3, (%0,%g1,%c2)%{%4%}|[%0+%g1*%c2]%{%4%}, %g3}\n\tjknzd\t{.Lknc_scatter%=, %4|%4, .Lknc_scatter%=}"
-  [(set_attr "type" "multi")
+  [(set_attr "knc_special" "gather")
+   (set_attr "type" "multi")
    (set_attr "memory" "store")
    (set_attr "length" "20")
    (set_attr "mode" "XI")])
@@ -1061,7 +1070,8 @@
 	  UNSPEC_KNC_PERMVAR))]
   "TARGET_KNC"
   "vpermd\t{%g1, %g2, %g0|%g0, %g2, %g1}"
-  [(set_attr "type" "sselog1")
+  [(set_attr "knc_special" "permute")
+   (set_attr "type" "sselog1")
    (set_attr "mode" "XI")])
 
 ;; Constant permutes (S5-06, ADR-0008 point 1), emitted only by
@@ -1081,7 +1091,8 @@
 	  (match_operand:HI 4 "register_operand" "YL")))]
   "TARGET_KNC"
   "vpermd\t{%g1, %g2, %g0%{%4%}|%g0%{%4%}, %g2, %g1}"
-  [(set_attr "type" "sselog1")
+  [(set_attr "knc_special" "permute")
+   (set_attr "type" "sselog1")
    (set_attr "mode" "XI")])
 
 (define_c_enum "unspec"
@@ -1111,7 +1122,8 @@
 	    INTVAL (operands[2]) & 8 ? 64 : 32, name, name);
   return buf;
 }
-  [(set_attr "type" "sselog1")
+  [(set_attr "knc_special" "permute")
+   (set_attr "type" "sselog1")
    (set_attr "mode" "XI")])
 
 ;; VPERMF32X4 p.482: 128-bit block N of the result is block
@@ -1124,7 +1136,8 @@
 	  UNSPEC_KNC_PERMF32X4))]
   "TARGET_KNC"
   "vpermf32x4\t{%2, %g1, %g0|%g0, %g1, %2}"
-  [(set_attr "type" "sselog1")
+  [(set_attr "knc_special" "permute")
+   (set_attr "type" "sselog1")
    (set_attr "length_immediate" "1")
    (set_attr "mode" "XI")])
 
@@ -1142,7 +1155,8 @@
           (match_operand:HI 4 "register_operand" "YL")))]
   "TARGET_KNC"
   "vpermf32x4\t{%2, %g1, %g0%{%4%}|%g0%{%4%}, %g1, %2}"
-  [(set_attr "type" "sselog1") (set_attr "mode" "XI")])
+  [(set_attr "knc_special" "permute")
+   (set_attr "type" "sselog1") (set_attr "mode" "XI")])
 
 ;; VPSHUFD p.536: dword J of every 128-bit block is dword
 ;; (operand 2 >> 2J) & 3 of the same block of operand 1.
@@ -1154,7 +1168,8 @@
 	  UNSPEC_KNC_PSHUFD))]
   "TARGET_KNC"
   "vpshufd\t{%2, %g1, %g0|%g0, %g1, %2}"
-  [(set_attr "type" "sselog1")
+  [(set_attr "knc_special" "permute")
+   (set_attr "type" "sselog1")
    (set_attr "length_immediate" "1")
    (set_attr "mode" "XI")])
 
@@ -1654,7 +1669,8 @@
     return "vg<knc_maxmin><knc_fp_suffix>\t{%g2%{cdab%}, %g1, %g0|%g0, %g1, %g2%{cdab%}}";
   return "vg<knc_maxmin><knc_fp_suffix>\t{%g2%{badc%}, %g1, %g0|%g0, %g1, %g2%{badc%}}";
 }
-  [(set_attr "type" "sseadd") (set_attr "mode" "<MODE>")])
+  [(set_attr "knc_special" "permute")
+   (set_attr "type" "sseadd") (set_attr "mode" "<MODE>")])
 
 (define_insn "*knc_reduc_f<knc_fminmax><mode>_swizzle"
   [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
@@ -1672,7 +1688,8 @@
     return "vg<knc_fminmax><knc_fp_suffix>\t{%g2%{cdab%}, %g1, %g0|%g0, %g1, %g2%{cdab%}}";
   return "vg<knc_fminmax><knc_fp_suffix>\t{%g2%{badc%}, %g1, %g0|%g0, %g1, %g2%{badc%}}";
 }
-  [(set_attr "type" "sseadd") (set_attr "mode" "<MODE>")])
+  [(set_attr "knc_special" "permute")
+   (set_attr "type" "sseadd") (set_attr "mode" "<MODE>")])
 
 ;; S5-07: reductions use the register-only SwizzUpConv operand (Intel
 ;; 327364-001 pp.28-30).  The selector is an exact VEC_SELECT: every lane
@@ -1697,7 +1714,8 @@
     return "vadd<knc_fp_suffix>\t{%g2%{cdab%}, %g1, %g0|%g0, %g1, %g2%{cdab%}}";
   return "vadd<knc_fp_suffix>\t{%g2%{badc%}, %g1, %g0|%g0, %g1, %g2%{badc%}}";
 }
-  [(set_attr "type" "sseadd") (set_attr "mode" "<MODE>")])
+  [(set_attr "knc_special" "permute")
+   (set_attr "type" "sseadd") (set_attr "mode" "<MODE>")])
 
 (define_insn "*knc_reduc_<code>v16si_swizzle"
   [(set (match_operand:V16SI 0 "register_operand" "=YJ")
@@ -1713,7 +1731,8 @@
     return "vp<knc_reduc_int>\t{%g2%{cdab%}, %g1, %g0|%g0, %g1, %g2%{cdab%}}";
   return "vp<knc_reduc_int>\t{%g2%{badc%}, %g1, %g0|%g0, %g1, %g2%{badc%}}";
 }
-  [(set_attr "type" "sseiadd") (set_attr "mode" "XI")])
+  [(set_attr "knc_special" "permute")
+   (set_attr "type" "sseiadd") (set_attr "mode" "XI")])
 
 (define_insn "*knc_reduc_<code><mode>_swizzle"
   [(set (match_operand:KNC_INT 0 "register_operand" "=YJ")
@@ -1729,7 +1748,8 @@
     return "vp<logic><knc_int_suffix>\t{%g2%{cdab%}, %g1, %g0|%g0, %g1, %g2%{cdab%}}";
   return "vp<logic><knc_int_suffix>\t{%g2%{badc%}, %g1, %g0|%g0, %g1, %g2%{badc%}}";
 }
-  [(set_attr "type" "sselog") (set_attr "mode" "XI")])
+  [(set_attr "knc_special" "permute")
+   (set_attr "type" "sselog") (set_attr "mode" "XI")])
 
 ;; S5-10, Intel 327364-001 pp.157-179, 197-198, 221-222, 316, 324,
 ;; 588-592.  Each UNSPEC is one register instruction: its rounding/SAE
@@ -1873,7 +1893,8 @@
                       UNSPEC_KNC_DIV_RCP))]
   "TARGET_KNC"
   "vrcp23ps\t{%{sae%}, %g1, %g0|%g0, %g1, %{sae%}}"
-  [(set_attr "type" "sse") (set_attr "mode" "V16SF")])
+  [(set_attr "knc_special" "reciprocal")
+   (set_attr "type" "sse") (set_attr "mode" "V16SF")])
 
 (define_insn "knc_div_sub"
   [(set (match_operand:V16SF 0 "register_operand" "=YJ")
@@ -1895,7 +1916,8 @@
           UNSPECV_KNC_DIV_FLAGS))]
   "TARGET_KNC"
   "vrcp23ps\t{%g1, %g0%{%3%}|%g0%{%3%}, %g1}"
-  [(set_attr "type" "sse") (set_attr "mode" "V16SF")])
+  [(set_attr "knc_special" "reciprocal")
+   (set_attr "type" "sse") (set_attr "mode" "V16SF")])
 
 (define_insn "knc_div_underflow"
   [(set (match_operand:V16SF 0 "register_operand" "=YJ")
