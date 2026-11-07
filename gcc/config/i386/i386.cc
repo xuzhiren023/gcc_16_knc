@@ -25676,6 +25676,12 @@ static int
 ix86_default_vector_cost (enum vect_cost_for_stmt type_of_cost,
 			  machine_mode mode)
 {
+  if (TARGET_KNC)
+    {
+      int cost = ix86_knc_stmt_cost (type_of_cost, mode, nullptr);
+      if (cost >= 0)
+        return cost;
+    }
   bool fp = FLOAT_MODE_P (mode);
   int index;
   switch (type_of_cost)
@@ -26267,6 +26273,19 @@ ix86_vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
 				  tree vectype, int,
 				  vect_cost_model_location where)
 {
+  /* Native IFN and legacy gather/scatter record one scalar access per lane in
+     tree-vect-stmts.cc.  Charge each vector instruction only on the vector
+     side; emulated accesses and the scalar baseline retain scalar costs.  */
+  if (TARGET_KNC && !m_costing_for_scalar && node
+      && (SLP_TREE_MEMORY_ACCESS_TYPE (node) == VMAT_GATHER_SCATTER_LEGACY
+          || SLP_TREE_MEMORY_ACCESS_TYPE (node) == VMAT_GATHER_SCATTER_IFN)
+      && (kind == scalar_load || kind == scalar_store))
+    {
+      unsigned lanes = TYPE_VECTOR_SUBPARTS (vectype).to_constant ();
+      gcc_assert (count % lanes == 0);
+      count /= lanes;
+      kind = kind == scalar_load ? vector_gather_load : vector_scatter_store;
+    }
   if (TARGET_KNC && ix86_knc_sqrt_stmt_p (kind, stmt_info, vectype))
     {
       unsigned cost = adjust_cost_for_freq (stmt_info, where, count
@@ -26580,6 +26599,14 @@ ix86_vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
 
 	case vector_stmt:
 	case vec_to_scalar:
+          /* KNC add/mul chains have the same four-cycle latency as FMA.
+             Reuse the existing reduction unroll calculation.  */
+          if (TARGET_KNC && kind == vector_stmt
+              && ix86_knc_reduction_p (stmt_info))
+            {
+              m_num_reduc[X86_REDUC_FMA] += count;
+              break;
+            }
 	  /* Count number of reduction FMA and "real" DOT_PROD_EXPR,
 	     unroll in the vectorizer will enable partial sum.  */
 	  if (stmt_info
@@ -26821,6 +26848,15 @@ ix86_vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
     }
   if (stmt_cost == -1)
     stmt_cost = ix86_default_vector_cost (kind, mode);
+  /* Only gather/scatter needs statement-specific KNC costs here.  Other
+     KNC defaults have already received the x86 lowering adjustments.  */
+  if (TARGET_KNC
+      && (kind == vector_gather_load || kind == vector_scatter_store))
+    {
+      int cost = ix86_knc_stmt_cost (kind, mode, stmt_info);
+      if (cost >= 0)
+        stmt_cost = cost;
+    }
   /* ADR-0007 point 7: KNC masked accesses are 64-byte aligned only.  */
   if (TARGET_KNC && ix86_knc_packed_mode_p (mode)
       && (kind == unaligned_load || kind == unaligned_store)

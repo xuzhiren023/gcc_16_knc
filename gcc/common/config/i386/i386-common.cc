@@ -2217,7 +2217,7 @@ STATIC_ASSERT (ARRAY_SIZE (processor_names) == PROCESSOR_max);
 
 const pta processor_alias_table[] =
 {
-  /* KNC uses generic costs provisionally, with no inherited SIMD ISA.  */
+  /* KNC selects its costs in i386-options.cc, with no inherited SIMD ISA.  */
   {"knc", PROCESSOR_GENERIC, CPU_GENERIC, PTA_64BIT | PTA_NO_SAHF,
     0, P_NONE},
   {"i386", PROCESSOR_I386, CPU_NONE, 0, 0, P_NONE},
