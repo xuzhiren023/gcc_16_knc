@@ -4,6 +4,19 @@
 LIB2ADD += $(srcdir)/config/i386/sfp-exceptions.c
 LIB2FUNCS_EXCLUDE += _mulhc3 _divhc3
 
+# Donor SF ABI: use the integer soft-fp implementation and its comparison
+# aliases, with KNC's existing rounding/exception machinery.  Do not expand
+# softfp_float_modes: that would also select unwanted integer conversions.
+softfp_extras += addsf3 divsf3 eqsf2 gesf2 lesf2 mulsf3 negsf2 subsf3 \
+		 unordsf2 fixsfsi floatsisf floatunsisf
+LIB2ADD += $(srcdir)/config/i386/knc-cpuinfo.c
+
+# The 64-bit map preserves frame-registration versions, TF defaults and
+# the supported _BitInt exports.  Map entries alone do not select HF/BF
+# implementations.  Unlike i386/t-linux, do not set USE_ELF_SYMVER: the
+# donor CPU names must be default definitions, not compatibility aliases.
+SHLIB_MAPFILES = libgcc-std.ver $(srcdir)/config/i386/libgcc-glibc.ver
+
 # sfp-exceptions.c's non-SSE branch raises exceptions with x87 operations
 # and fnstenv/fldenv.  No SSE math flags are set for KNC.
 HOST_LIBGCC2_CFLAGS += -mlong-double-80

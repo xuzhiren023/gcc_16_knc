@@ -808,7 +808,7 @@ k1om-*-linux*)
 	# Static KNC runtime: no SSE half/bfloat helpers, MS ABI saves,
 	# CPU dispatch or decimal float.  Use the KNC fast-math constructor.
 	extra_parts="$extra_parts crtfastmath.o"
-	tmake_file="${tmake_file} i386/t-crtstuff t-tls t-softfp-tf i386/t-knc t-softfp"
+	tmake_file="${tmake_file} i386/t-crtstuff t-tls t-softfp-tf i386/t-knc t-softfp i386/64/t-softfp-compat"
 	tm_file="${tm_file} i386/elf-lib.h i386/value-unwind.h"
 	sfp_machine_header=i386/knc-sfp-machine.h
 	md_unwind_header=i386/linux-unwind.h
