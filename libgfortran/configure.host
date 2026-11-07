@@ -41,6 +41,12 @@ fi
 
 case "${host_cpu}" in
 
+  # KNC uses x87 and IMCI, with reserved MXCSR exception-mask bits.
+  k1om)
+    fpu_host='fpu-knc'
+    ieee_support='yes'
+    ;;
+
   # x86 asm should be used instead of glibc, since glibc doesn't support
   # the x86 denormal exception.
   i?86 | x86_64)
