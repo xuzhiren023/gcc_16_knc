@@ -75,7 +75,9 @@ knc_processor_costs (unsigned chains)
       {2, 2, 2}, {2, 2, 2},    /* E: mask memory access like scalar L1.  */
       1                       /* CH kmov.rt.  */
     },
-    COSTS_N_INSNS (1) / 2,     /* CH scalar_add.rt: half cycle.  */
+    COSTS_N_INSNS (1),         /* CH scalar_add.lat: one cycle per core at
+                                 density 4.  Dependent IV updates cannot use
+                                 the half-cycle independent-add throughput.  */
     COSTS_N_INSNS (1),         /* E: LEA, one unpaired address operation.  */
     COSTS_N_INSNS (1), COSTS_N_INSNS (1), /* E: shifts, one scalar op.  */
     {COSTS_N_INSNS (3), COSTS_N_INSNS (3), COSTS_N_INSNS (3),
