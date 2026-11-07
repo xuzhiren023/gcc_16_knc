@@ -54,13 +54,9 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
 #undef DWARF_VERSION_DEFAULT
 #define DWARF_VERSION_DEFAULT 4
 
-/* The KNC port supplies static libgcc.  Do not import the generic Linux
-   driver's shared-runtime scripts or an implicit libatomic dependency.
-   Explicit -latomic remains available for operations needing that library.  */
-#define REAL_LIBGCC_SPEC \
-  "%{shared-libgcc:%eKNC shared libgcc is not available} -lgcc"
-#undef LIBGCC_SPEC
-#define LIBGCC_SPEC REAL_LIBGCC_SPEC
+/* Use gcc.cc:init_gcc_specs for shared/static libgcc selection, including
+   Linux's as-needed default and static-libgcc override.  Keep libatomic
+   explicit until that separate runtime is provided by this port.  */
 #undef TARGET_PROVIDES_LIBATOMIC
 
 /* The driver otherwise injects its configured x86-64/generic defaults

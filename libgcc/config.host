@@ -805,10 +805,11 @@ i[34567]86-*-gnu*)
 	md_unwind_header=i386/gnu-unwind.h
 	;;
 k1om-*-linux*)
-	# Static KNC runtime: no SSE half/bfloat helpers, MS ABI saves,
-	# CPU dispatch or decimal float.  Use the KNC fast-math constructor.
+	# KNC runtime: no SSE half/bfloat helpers, MS ABI saves or decimal
+	# float.  Use KNC's CPU model and fast-math constructor.  The shared
+	# linker script also supplies helpers that exist only in libgcc.a.
 	extra_parts="$extra_parts crtfastmath.o"
-	tmake_file="${tmake_file} i386/t-crtstuff t-tls t-softfp-tf i386/t-knc t-softfp i386/64/t-softfp-compat"
+	tmake_file="${tmake_file} i386/t-crtstuff t-tls t-softfp-tf i386/t-knc t-softfp i386/64/t-softfp-compat t-slibgcc-libgcc"
 	tm_file="${tm_file} i386/elf-lib.h i386/value-unwind.h"
 	sfp_machine_header=i386/knc-sfp-machine.h
 	md_unwind_header=i386/linux-unwind.h

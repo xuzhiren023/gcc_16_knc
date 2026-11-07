@@ -21,10 +21,6 @@ SHLIB_MAPFILES = libgcc-std.ver $(srcdir)/config/i386/libgcc-glibc.ver
 # and fnstenv/fldenv.  No SSE math flags are set for KNC.
 HOST_LIBGCC2_CFLAGS += -mlong-double-80
 
-# Only the static runtime is ported.  Keep Linux's PIC CRT and unwinder,
-# but do not build or advertise an unaudited shared libgcc.
-enable_shared := no
-
 # Match the donor's 64-bit crtfastmath without enabling SSE builtins.
 crtfastmath.o: $(srcdir)/config/i386/knc-crtfastmath.c
 	$(gcc_compile) -c $<
