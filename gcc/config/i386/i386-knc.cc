@@ -515,17 +515,26 @@ ix86_knc_masked_epilogue_p (loop_vec_info loop_vinfo)
 	 || (unsigned HOST_WIDE_INT) rest > knc_x87_tail_limit (aligned);
 }
 
-/* For ix86_vector_costs::finish_cost, on a main loop over partial vectors
-   with a known trip count: whether that count is within C6's x87 limit,
-   so that the whole-loop mask must lose.  KNC has no narrower vector mode,
-   so this replaces the generic rejection in favour of a narrower mode.  */
+/* For ix86_vector_costs::finish_cost, on a loop over partial vectors with
+   a known trip count: whether the iterations it would mask (the trip
+   count of a main loop, the remainder the main loop leaves an epilogue)
+   are within C6's x87 limit, so that the masked loop must lose and the
+   x87 loop stays.  With partial-vector usage 1 every epilogue is masked
+   unless rejected here.  KNC has no narrower vector mode, so this also
+   replaces the generic rejection in favour of a narrower mode.  */
 bool
 ix86_knc_short_masked_loop_p (loop_vec_info loop_vinfo)
 {
   bool aligned;
   knc_masked_loop_rejection (loop_vinfo, &aligned);
-  return ((unsigned HOST_WIDE_INT) LOOP_VINFO_INT_NITERS (loop_vinfo)
-	  <= knc_x87_tail_limit (aligned));
+  HOST_WIDE_INT niters = LOOP_VINFO_INT_NITERS (loop_vinfo);
+  if (LOOP_VINFO_EPILOGUE_P (loop_vinfo))
+    {
+      niters = knc_known_remainder (LOOP_VINFO_MAIN_LOOP_INFO (loop_vinfo));
+      if (niters < 0)
+	return false;
+    }
+  return (unsigned HOST_WIDE_INT) niters <= knc_x87_tail_limit (aligned);
 }
 
 /* Report costed candidates, not the vectorizer's eventual selection.  The

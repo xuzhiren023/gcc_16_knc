@@ -26989,11 +26989,12 @@ ix86_vector_costs::finish_cost (const vector_costs *scalar_costs)
 	 so we could restrict this rejection to AVX and AVX512 modes
 	 but error on the safe side for now.  */
       if (LOOP_VINFO_USING_PARTIAL_VECTORS_P (loop_vinfo)
-	  && !LOOP_VINFO_EPILOGUE_P (loop_vinfo)
 	  && LOOP_VINFO_NITERS_KNOWN_P (loop_vinfo)
 	  && (TARGET_KNC ? ix86_knc_short_masked_loop_p (loop_vinfo)
-	      : (exact_log2 (LOOP_VINFO_VECT_FACTOR (loop_vinfo).to_constant ())
-		 > ceil_log2 (LOOP_VINFO_INT_NITERS (loop_vinfo)))))
+	      : (!LOOP_VINFO_EPILOGUE_P (loop_vinfo)
+		 && (exact_log2 (LOOP_VINFO_VECT_FACTOR (loop_vinfo)
+				 .to_constant ())
+		     > ceil_log2 (LOOP_VINFO_INT_NITERS (loop_vinfo))))))
 	m_costs[vect_body] = INT_MAX;
 
       /* We'd like to avoid using masking if there's an in-order reduction
