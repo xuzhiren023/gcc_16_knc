@@ -48,6 +48,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-data-ref.h"
 #include "diagnostic-core.h"
 #include "dbgcnt.h"
+#include "tree-affine.h"
 
 /* This pass inserts prefetch instructions to optimize cache usage during
    accesses to arrays in loops.  It processes loops sequentially and:
@@ -306,22 +307,68 @@ dump_mem_ref (FILE *file, struct mem_ref *ref)
   fprintf (file, ")\n");
 }
 
+/* Expansion cache for affine_base_difference, kept while the references of
+   one loop are gathered.  */
+static hash_map<tree, name_expansion *> *affine_expand_cache;
+
+/* If the addresses of the memory references A and B differ by a constant,
+   store it in *DIFF and return true.  The vectorizer gives each access its
+   own pointer, initialized before the loop as the array plus an offset that
+   is computed separately for each access; expanding those initial values
+   through their definitions shows x[i-1], x[i] and x[i+1] as one stream,
+   as they are when the loop is not vectorized.  */
+
+static bool
+affine_base_difference (tree a, tree b, HOST_WIDE_INT *diff)
+{
+  if (TREE_CODE (a) != MEM_REF || TREE_CODE (b) != MEM_REF
+      || !types_compatible_p (TREE_TYPE (a), TREE_TYPE (b)))
+    return false;
+
+  aff_tree aff_a, aff_b;
+  tree_to_aff_combination_expand (fold_convert (sizetype,
+						build_fold_addr_expr (a)),
+				  sizetype, &aff_a, &affine_expand_cache);
+  tree_to_aff_combination_expand (fold_convert (sizetype,
+						build_fold_addr_expr (b)),
+				  sizetype, &aff_b, &affine_expand_cache);
+  aff_combination_scale (&aff_b, -1);
+  aff_combination_add (&aff_a, &aff_b);
+  if (!aff_combination_const_p (&aff_a))
+    return false;
+
+  widest_int offset;
+  if (!aff_a.offset.is_constant (&offset) || !wi::fits_shwi_p (offset))
+    return false;
+  *diff = offset.to_shwi ();
+  return true;
+}
+
 /* Finds a group with BASE and STEP in GROUPS, or creates one if it does not
-   exist.  */
+   exist.  A group whose base differs from BASE by a constant also matches;
+   the constant is then added to *DELTA.  */
 
 static struct mem_ref_group *
-find_or_create_group (struct mem_ref_group **groups, tree base, tree step)
+find_or_create_group (struct mem_ref_group **groups, tree base, tree step,
+		      HOST_WIDE_INT *delta)
 {
   /* Global count for setting struct mem_ref_group->uid.  */
   static unsigned int last_mem_ref_group_uid = 0;
 
   struct mem_ref_group *group;
+  HOST_WIDE_INT diff;
 
   for (; *groups; groups = &(*groups)->next)
     {
       if (operand_equal_p ((*groups)->step, step, 0)
 	  && operand_equal_p ((*groups)->base, base, 0))
 	return *groups;
+      if (operand_equal_p ((*groups)->step, step, 0)
+	  && affine_base_difference (base, (*groups)->base, &diff))
+	{
+	  *delta += diff;
+	  return *groups;
+	}
 
       /* If step is an integer constant, keep the list of groups sorted
          by decreasing step.  */
@@ -448,21 +495,6 @@ idx_analyze_ref (tree base, tree *index, void *data)
     {
       idelta = int_cst_value (TREE_OPERAND (ibase, 1));
       ibase = TREE_OPERAND (ibase, 0);
-    }
-  /* The vectorizer gives each access its own pointer, initialized outside
-     the loop as the array plus a constant.  Fold those constants into the
-     delta so that x[i-1], x[i] and x[i+1] fall into one group and share a
-     prefetch, as they do when the loop is not vectorized.  */
-  while (TREE_CODE (ibase) == SSA_NAME)
-    {
-      gimple *def = SSA_NAME_DEF_STMT (ibase);
-      if (!is_gimple_assign (def)
-	  || gimple_assign_rhs_code (def) != POINTER_PLUS_EXPR
-	  || !cst_and_fits_in_hwi (gimple_assign_rhs2 (def))
-	  || flow_bb_inside_loop_p (ar_data->loop, gimple_bb (def)))
-	break;
-      idelta += int_cst_value (gimple_assign_rhs2 (def));
-      ibase = gimple_assign_rhs1 (def);
     }
   if (cst_and_fits_in_hwi (ibase))
     {
@@ -610,7 +642,7 @@ gather_memory_references_ref (class loop *loop, struct mem_ref_group **refs,
 
   /* Now we know that REF = &BASE + STEP * iter + DELTA, where DELTA and STEP
      are integer constants.  */
-  agrp = find_or_create_group (refs, base, step);
+  agrp = find_or_create_group (refs, base, step, &delta);
   record_ref (agrp, stmt, ref, delta, write_p);
 
   return true;
@@ -675,6 +707,7 @@ gather_memory_references (class loop *loop, bool *no_other_refs, unsigned *ref_c
 	}
     }
   free (body);
+  free_affine_expand_cache (&affine_expand_cache);
 
   return refs;
 }
