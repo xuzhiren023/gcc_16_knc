@@ -834,23 +834,11 @@ ix86_knc_expand_duplicate (rtx target, rtx value)
       emit_move_insn (mem, value);
       value = mem;
     }
-  if (MEM_P (value))
-    emit_insn (gen_rtx_SET (target, gen_rtx_VEC_DUPLICATE (mode, value)));
-  else
-    {
-      rtx block = gen_reg_rtx (mode);
-      value = force_reg (inner, value);
-      if (mode == V16SFmode)
-	{
-	  emit_insn (gen_knc_broadcast_blockv16sf (block, value));
-	  emit_insn (gen_knc_broadcast_swizzlev16sf (target, block));
-	}
-      else
-	{
-	  emit_insn (gen_knc_broadcast_blockv8df (block, value));
-	  emit_insn (gen_knc_broadcast_swizzlev8df (target, block));
-	}
-    }
+  /* A register value stays a vec_duplicate until reload
+     (*knc_duplicate_reg, S8-06), so combine can fold its load.  */
+  if (!MEM_P (value))
+    value = force_reg (inner, value);
+  emit_insn (gen_rtx_SET (target, gen_rtx_VEC_DUPLICATE (mode, value)));
 }
 
 /* General construction uses scalar stores followed by one aligned load.

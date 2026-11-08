@@ -609,6 +609,34 @@
   [(set_attr "type" "<knc_fp_type>")
    (set_attr "mode" "<MODE>")])
 
+;; S8-06: an element-aligned scalar folded as a {1to16}/{1to8} broadcast
+;; (Intel 327364-001 Table 4.2; S3-03: IMCI memory operands are aligned to
+;; the access size).  Canonical RTL puts the vec_duplicate first for plus
+;; and mult, and minus can only take it as the subtrahend.
+(define_mode_attr knc_bcst [(V16SF "1to16") (V8DF "1to8")])
+(define_code_iterator KNC_FP_COMM [plus mult])
+(define_insn "*knc_<knc_fp_binary><mode>3_bcst"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
+        (KNC_FP_COMM:KNC_FP
+          (vec_duplicate:KNC_FP
+            (match_operand:<knc_fp_scalar> 2 "memory_operand" "m"))
+          (match_operand:KNC_FP 1 "register_operand" "YJ")))]
+  "TARGET_KNC && ix86_knc_element_aligned_mem_p (operands[2], <MODE>mode)"
+  "v<knc_fp_binary><knc_fp_suffix>\t%2%{<knc_bcst>%}, %g1, %g0"
+  [(set_attr "type" "<knc_fp_type>")
+   (set_attr "mode" "<MODE>")])
+
+(define_insn "*knc_sub<mode>3_bcst"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
+        (minus:KNC_FP
+          (match_operand:KNC_FP 1 "register_operand" "YJ")
+          (vec_duplicate:KNC_FP
+            (match_operand:<knc_fp_scalar> 2 "memory_operand" "m"))))]
+  "TARGET_KNC && ix86_knc_element_aligned_mem_p (operands[2], <MODE>mode)"
+  "vsub<knc_fp_suffix>\t%2%{<knc_bcst>%}, %g1, %g0"
+  [(set_attr "type" "sseadd")
+   (set_attr "mode" "<MODE>")])
+
 ;; Intel 327364-001 VPADDD, VPSUBD, VPMULLD and VPAND/VPOR/VPXOR{D,Q}.
 ;; k1om has no vpaddq, vpsubq or vpmullq, so V8DI is logic only (ADR-0005
 ;; point 3).  The memory source is aligned and full-width, as above (S4-09).
@@ -639,43 +667,110 @@
   [(set_attr "type" "sselog")
    (set_attr "mode" "XI")])
 
-;; All four FMAMODEM expanders become available together.  These register
-;; forms implement each sign combination without any separate negation.
-;; The tied addend models the destructive 231 encoding for the allocator.
+;; All four FMAMODEM expanders become available together.  These forms
+;; implement each sign combination without any separate negation.  The
+;; tied operand models the destructive encoding for the allocator: 231
+;; ties the addend, 132 and 213 a multiplicand.  S8-06: the last source
+;; may be an aligned full-line memory operand (Bm, as for vaddp above), as
+;; a multiplicand (231, 132) or as the addend (213) (Intel 327364-001
+;; VFMADD132/213/231PS/PD and the other sign forms; Table 4.2).
 (define_insn "*knc_fma<mode>4"
-  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
-        (fma:KNC_FP (match_operand:KNC_FP 1 "nonimmediate_operand" "YJ")
-                    (match_operand:KNC_FP 2 "nonimmediate_operand" "YJ")
-                    (match_operand:KNC_FP 3 "nonimmediate_operand" "0")))]
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ,YJ,YJ,YJ")
+        (fma:KNC_FP (match_operand:KNC_FP 1 "nonimmediate_operand" "%YJ,YJ,0,0")
+                    (match_operand:KNC_FP 2 "nonimmediate_operand" "YJ,Bm,Bm,YJ")
+                    (match_operand:KNC_FP 3 "nonimmediate_operand" "0,0,YJ,YJBm")))]
   "TARGET_KNC"
-  "vfmadd231<knc_fp_suffix>\t%g2, %g1, %g0"
+  "@
+   vfmadd231<knc_fp_suffix>\t%g2, %g1, %g0
+   vfmadd231<knc_fp_suffix>\t%g2, %g1, %g0
+   vfmadd132<knc_fp_suffix>\t%g2, %g3, %g0
+   vfmadd213<knc_fp_suffix>\t%g3, %g2, %g0"
   [(set_attr "type" "ssemuladd") (set_attr "mode" "<MODE>")])
 
 (define_insn "*knc_fms<mode>4"
-  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
-        (fma:KNC_FP (match_operand:KNC_FP 1 "nonimmediate_operand" "YJ")
-                    (match_operand:KNC_FP 2 "nonimmediate_operand" "YJ")
-                    (neg:KNC_FP (match_operand:KNC_FP 3 "nonimmediate_operand" "0"))))]
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ,YJ,YJ,YJ")
+        (fma:KNC_FP (match_operand:KNC_FP 1 "nonimmediate_operand" "%YJ,YJ,0,0")
+                    (match_operand:KNC_FP 2 "nonimmediate_operand" "YJ,Bm,Bm,YJ")
+                    (neg:KNC_FP (match_operand:KNC_FP 3 "nonimmediate_operand" "0,0,YJ,YJBm"))))]
   "TARGET_KNC"
-  "vfmsub231<knc_fp_suffix>\t%g2, %g1, %g0"
+  "@
+   vfmsub231<knc_fp_suffix>\t%g2, %g1, %g0
+   vfmsub231<knc_fp_suffix>\t%g2, %g1, %g0
+   vfmsub132<knc_fp_suffix>\t%g2, %g3, %g0
+   vfmsub213<knc_fp_suffix>\t%g3, %g2, %g0"
   [(set_attr "type" "ssemuladd") (set_attr "mode" "<MODE>")])
 
 (define_insn "*knc_fnma<mode>4"
-  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
-        (fma:KNC_FP (neg:KNC_FP (match_operand:KNC_FP 1 "nonimmediate_operand" "YJ"))
-                    (match_operand:KNC_FP 2 "nonimmediate_operand" "YJ")
-                    (match_operand:KNC_FP 3 "nonimmediate_operand" "0")))]
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ,YJ,YJ,YJ")
+        (fma:KNC_FP (neg:KNC_FP (match_operand:KNC_FP 1 "nonimmediate_operand" "%YJ,YJ,0,0"))
+                    (match_operand:KNC_FP 2 "nonimmediate_operand" "YJ,Bm,Bm,YJ")
+                    (match_operand:KNC_FP 3 "nonimmediate_operand" "0,0,YJ,YJBm")))]
   "TARGET_KNC"
-  "vfnmadd231<knc_fp_suffix>\t%g2, %g1, %g0"
+  "@
+   vfnmadd231<knc_fp_suffix>\t%g2, %g1, %g0
+   vfnmadd231<knc_fp_suffix>\t%g2, %g1, %g0
+   vfnmadd132<knc_fp_suffix>\t%g2, %g3, %g0
+   vfnmadd213<knc_fp_suffix>\t%g3, %g2, %g0"
   [(set_attr "type" "ssemuladd") (set_attr "mode" "<MODE>")])
 
 (define_insn "*knc_fnms<mode>4"
-  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
-        (fma:KNC_FP (neg:KNC_FP (match_operand:KNC_FP 1 "nonimmediate_operand" "YJ"))
-                    (match_operand:KNC_FP 2 "nonimmediate_operand" "YJ")
-                    (neg:KNC_FP (match_operand:KNC_FP 3 "nonimmediate_operand" "0"))))]
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ,YJ,YJ,YJ")
+        (fma:KNC_FP (neg:KNC_FP (match_operand:KNC_FP 1 "nonimmediate_operand" "%YJ,YJ,0,0"))
+                    (match_operand:KNC_FP 2 "nonimmediate_operand" "YJ,Bm,Bm,YJ")
+                    (neg:KNC_FP (match_operand:KNC_FP 3 "nonimmediate_operand" "0,0,YJ,YJBm"))))]
   "TARGET_KNC"
-  "vfnmsub231<knc_fp_suffix>\t%g2, %g1, %g0"
+  "@
+   vfnmsub231<knc_fp_suffix>\t%g2, %g1, %g0
+   vfnmsub231<knc_fp_suffix>\t%g2, %g1, %g0
+   vfnmsub132<knc_fp_suffix>\t%g2, %g3, %g0
+   vfnmsub213<knc_fp_suffix>\t%g3, %g2, %g0"
+  [(set_attr "type" "ssemuladd") (set_attr "mode" "<MODE>")])
+
+;; S8-06: a scalar multiplicand folded as a {1to16}/{1to8} broadcast.
+;; Canonical RTL puts the vec_duplicate first unless the other multiplicand
+;; is negated (simplify_ternary_operation, FMA).
+(define_insn "*knc_fma<mode>4_bcst"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ,YJ")
+        (fma:KNC_FP (vec_duplicate:KNC_FP (match_operand:<knc_fp_scalar> 1 "memory_operand" "m,m"))
+                    (match_operand:KNC_FP 2 "register_operand" "YJ,0")
+                    (match_operand:KNC_FP 3 "register_operand" "0,YJ")))]
+  "TARGET_KNC && ix86_knc_element_aligned_mem_p (operands[1], <MODE>mode)"
+  "@
+   vfmadd231<knc_fp_suffix>\t%1%{<knc_bcst>%}, %g2, %g0
+   vfmadd132<knc_fp_suffix>\t%1%{<knc_bcst>%}, %g3, %g0"
+  [(set_attr "type" "ssemuladd") (set_attr "mode" "<MODE>")])
+
+(define_insn "*knc_fms<mode>4_bcst"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ,YJ")
+        (fma:KNC_FP (vec_duplicate:KNC_FP (match_operand:<knc_fp_scalar> 1 "memory_operand" "m,m"))
+                    (match_operand:KNC_FP 2 "register_operand" "YJ,0")
+                    (neg:KNC_FP (match_operand:KNC_FP 3 "register_operand" "0,YJ"))))]
+  "TARGET_KNC && ix86_knc_element_aligned_mem_p (operands[1], <MODE>mode)"
+  "@
+   vfmsub231<knc_fp_suffix>\t%1%{<knc_bcst>%}, %g2, %g0
+   vfmsub132<knc_fp_suffix>\t%1%{<knc_bcst>%}, %g3, %g0"
+  [(set_attr "type" "ssemuladd") (set_attr "mode" "<MODE>")])
+
+(define_insn "*knc_fnma<mode>4_bcst"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ,YJ")
+        (fma:KNC_FP (neg:KNC_FP (match_operand:KNC_FP 2 "register_operand" "YJ,0"))
+                    (vec_duplicate:KNC_FP (match_operand:<knc_fp_scalar> 1 "memory_operand" "m,m"))
+                    (match_operand:KNC_FP 3 "register_operand" "0,YJ")))]
+  "TARGET_KNC && ix86_knc_element_aligned_mem_p (operands[1], <MODE>mode)"
+  "@
+   vfnmadd231<knc_fp_suffix>\t%1%{<knc_bcst>%}, %g2, %g0
+   vfnmadd132<knc_fp_suffix>\t%1%{<knc_bcst>%}, %g3, %g0"
+  [(set_attr "type" "ssemuladd") (set_attr "mode" "<MODE>")])
+
+(define_insn "*knc_fnms<mode>4_bcst"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ,YJ")
+        (fma:KNC_FP (neg:KNC_FP (match_operand:KNC_FP 2 "register_operand" "YJ,0"))
+                    (vec_duplicate:KNC_FP (match_operand:<knc_fp_scalar> 1 "memory_operand" "m,m"))
+                    (neg:KNC_FP (match_operand:KNC_FP 3 "register_operand" "0,YJ"))))]
+  "TARGET_KNC && ix86_knc_element_aligned_mem_p (operands[1], <MODE>mode)"
+  "@
+   vfnmsub231<knc_fp_suffix>\t%1%{<knc_bcst>%}, %g2, %g0
+   vfnmsub132<knc_fp_suffix>\t%1%{<knc_bcst>%}, %g3, %g0"
   [(set_attr "type" "ssemuladd") (set_attr "mode" "<MODE>")])
 
 (define_expand "vec_duplicate<mode>"
@@ -764,6 +859,28 @@
   "TARGET_KNC && ix86_knc_element_aligned_mem_p (operands[1], <MODE>mode)"
   "<knc_packed_broadcast>\t%1, %g0"
   [(set_attr "type" "ssemov") (set_attr "mode" "<knc_packed_insn_mode>")])
+
+;; S8-06: a register broadcast stays one vec_duplicate until reload, so
+;; combine sees a scalar load feeding it and folds the load into a
+;; {1to16}/{1to8} operand or *knc_broadcast_memory.  A spilled scalar is
+;; broadcast from its slot; otherwise this splits into the block and the
+;; swizzle below.
+(define_insn_and_split "*knc_duplicate_reg<mode>"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ,YJ")
+        (vec_duplicate:KNC_FP
+          (match_operand:<knc_fp_scalar> 1 "register_operand" "YJ,m")))]
+  "TARGET_KNC"
+  "@
+   #
+   <knc_packed_broadcast>\t%1, %g0"
+  "&& reload_completed && REG_P (operands[1])"
+  [(const_int 0)]
+{
+  emit_insn (gen_knc_broadcast_block<mode> (operands[0], operands[1]));
+  emit_insn (gen_knc_broadcast_swizzle<mode> (operands[0], operands[0]));
+  DONE;
+}
+  [(set_attr "type" "ssemov") (set_attr "mode" "<MODE>")])
 
 ;; The block result has four copies of the scalar's low 128-bit block.
 ;; Upper scalar lanes are unspecified; the following swizzle selects only
@@ -1336,12 +1453,13 @@
 ;; Masked FMA (S4-05, Intel 327364-001 VFMADD231PS/PD): active lanes get
 ;; operand 1 * operand 2 + operand 3 with one rounding, like the unmasked
 ;; body; the others keep operand 3 and raise no exception (2.1.2, p.22).
+;; An aligned full-line operand 2 folds as in the masked vaddp (S8-06).
 (define_insn "knc_fma<mode>_mask"
   [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
 	(vec_merge:KNC_FP
 	  (fma:KNC_FP
 	    (match_operand:KNC_FP 1 "register_operand" "YJ")
-	    (match_operand:KNC_FP 2 "register_operand" "YJ")
+	    (match_operand:KNC_FP 2 "vector_operand" "YJBm")
 	    (match_operand:KNC_FP 3 "register_operand" "0"))
 	  (match_dup 3)
 	  (match_operand:<knc_maskmode> 4 "register_operand" "YL")))]
