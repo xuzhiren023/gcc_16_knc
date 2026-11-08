@@ -1157,10 +1157,13 @@ estimate_prefetch_count (struct mem_ref_group *groups, unsigned unroll_factor)
 
 /* Issue prefetches for the reference REF into loop as decided before.
    HEAD is the number of iterations to prefetch ahead.  UNROLL_FACTOR
-   is the factor by which LOOP was unrolled.  */
+   is the factor by which LOOP was unrolled.  FAR_P marks the far prefetch
+   of a target with two-level distances (TARGET_PREFETCH_DISTANCES), which
+   fills the next cache level: locality 2, or 1 when nontemporal.  */
 
 static void
-issue_prefetch_ref (struct mem_ref *ref, unsigned unroll_factor, unsigned ahead)
+issue_prefetch_ref_1 (struct mem_ref *ref, unsigned unroll_factor,
+		      unsigned ahead, bool far_p)
 {
   HOST_WIDE_INT delta;
   tree addr, addr_base, write_p, local, forward;
@@ -1168,10 +1171,11 @@ issue_prefetch_ref (struct mem_ref *ref, unsigned unroll_factor, unsigned ahead)
   gimple_stmt_iterator bsi;
   unsigned n_prefetches, ap;
   bool nontemporal = ref->reuse_distance >= L2_CACHE_SIZE_BYTES;
+  int locality = nontemporal ? (far_p ? 1 : 0) : (far_p ? 2 : 3);
 
   if (dump_file && (dump_flags & TDF_DETAILS))
-    fprintf (dump_file, "Issued%s prefetch for reference %u:%u.\n",
-	     nontemporal ? " nontemporal" : "",
+    fprintf (dump_file, "Issued%s%s prefetch for reference %u:%u.\n",
+	     nontemporal ? " nontemporal" : "", far_p ? " far" : "",
 	     ref->group->uid, ref->uid);
 
   bsi = gsi_for_stmt (ref->stmt);
@@ -1182,7 +1186,7 @@ issue_prefetch_ref (struct mem_ref *ref, unsigned unroll_factor, unsigned ahead)
   addr_base = force_gimple_operand_gsi (&bsi, unshare_expr (addr_base),
 					true, NULL, true, GSI_SAME_STMT);
   write_p = ref->write_p ? integer_one_node : integer_zero_node;
-  local = nontemporal ? integer_zero_node : build_int_cst (integer_type_node, 3);
+  local = build_int_cst (integer_type_node, locality);
 
   for (ap = 0; ap < n_prefetches; ap++)
     {
@@ -1225,20 +1229,70 @@ issue_prefetch_ref (struct mem_ref *ref, unsigned unroll_factor, unsigned ahead)
     }
 }
 
+/* Issue prefetches for the reference REF into loop as decided before.
+   HEAD is the number of iterations to prefetch ahead.  UNROLL_FACTOR
+   is the factor by which LOOP was unrolled.  FAR_AHEAD, when nonzero, is
+   the far distance of a target with two-level distances, prefetched into
+   the next cache level ahead of the near prefetch.  */
+
+static void
+issue_prefetch_ref (struct mem_ref *ref, unsigned unroll_factor, unsigned ahead,
+		    unsigned far_ahead)
+{
+  if (far_ahead)
+    issue_prefetch_ref_1 (ref, unroll_factor, far_ahead, true);
+  issue_prefetch_ref_1 (ref, unroll_factor, ahead, false);
+}
+
 /* Issue prefetches for the references in GROUPS into loop as decided before.
    HEAD is the number of iterations to prefetch ahead.  UNROLL_FACTOR is the
-   factor by that LOOP was unrolled.  */
+   factor by that LOOP was unrolled.  FAR_AHEAD is as for issue_prefetch_ref.  */
 
 static void
 issue_prefetches (struct mem_ref_group *groups,
-		  unsigned unroll_factor, unsigned ahead)
+		  unsigned unroll_factor, unsigned ahead, unsigned far_ahead)
 {
   struct mem_ref *ref;
 
   for (; groups; groups = groups->next)
     for (ref = groups->refs; ref; ref = ref->next)
       if (ref->issue_prefetch_p)
-	issue_prefetch_ref (ref, unroll_factor, ahead);
+	issue_prefetch_ref (ref, unroll_factor, ahead, far_ahead);
+}
+
+/* Ask the target for two-level prefetch distances for the streams in GROUPS
+   that will be prefetched.  On success set *AHEAD and *FAR_AHEAD, in
+   iterations, and return true.  The target answers in cache lines; a stream
+   whose step is below a line is prefetched once per PREFETCH_MOD iterations,
+   so the smallest PREFETCH_MOD in the loop (its largest step) converts lines
+   to iterations and no stream runs further ahead than asked.  */
+
+static bool
+target_prefetch_distances (struct mem_ref_group *groups, unsigned *ahead,
+			   unsigned *far_ahead)
+{
+  struct mem_ref *ref;
+  unsigned nstreams = 0, mod = 0, near, far;
+
+  for (; groups; groups = groups->next)
+    for (ref = groups->refs; ref; ref = ref->next)
+      if (should_issue_prefetch_p (ref))
+	{
+	  nstreams++;
+	  if (mod == 0 || ref->prefetch_mod < mod)
+	    mod = ref->prefetch_mod;
+	}
+
+  if (nstreams == 0
+      || !targetm.prefetch_distances (nstreams, &near, &far))
+    return false;
+
+  *ahead = MAX (1, near * mod);
+  *far_ahead = MAX (1, far * mod);
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "Target distances for %u streams: %u and %u lines, "
+	     "%u and %u iterations\n", nstreams, near, far, *ahead, *far_ahead);
+  return true;
 }
 
 /* Returns true if REF is a memory write for that a nontemporal store insn
@@ -1890,6 +1944,8 @@ loop_prefetch_arrays (class loop *loop, bool &need_lc_ssa_update)
 {
   struct mem_ref_group *refs;
   unsigned ahead, ninsns, time, unroll_factor;
+  unsigned far_ahead = 0, near, far;
+  bool two_level;
   HOST_WIDE_INT est_niter;
   class tree_niter_desc desc;
   bool unrolled = false, no_other_refs;
@@ -1915,8 +1971,12 @@ loop_prefetch_arrays (class loop *loop, bool &need_lc_ssa_update)
     est_niter = likely_max_stmt_executions_int (loop);
 
   /* Prefetching is not likely to be profitable if the trip count to ahead
-     ratio is too small.  */
-  if (trip_count_to_ahead_ratio_too_small_p (ahead, est_niter))
+     ratio is too small.  A target with two-level prefetch distances
+     (TARGET_PREFETCH_DISTANCES) checks against its far distance once the
+     streams are known, in step 2.  */
+  two_level = (targetm.prefetch_distances
+	       && targetm.prefetch_distances (0, &near, &far));
+  if (!two_level && trip_count_to_ahead_ratio_too_small_p (ahead, est_niter))
     return false;
 
   ninsns = tree_num_loop_insns (loop, &eni_size_weights);
@@ -1934,6 +1994,11 @@ loop_prefetch_arrays (class loop *loop, bool &need_lc_ssa_update)
   prune_by_reuse (refs);
 
   if (nothing_to_prefetch_p (refs))
+    goto fail;
+
+  if (two_level
+      && (!target_prefetch_distances (refs, &ahead, &far_ahead)
+	  || trip_count_to_ahead_ratio_too_small_p (far_ahead, est_niter)))
     goto fail;
 
   if (!determine_loop_nest_reuse (loop, refs, no_other_refs))
@@ -1963,8 +2028,9 @@ loop_prefetch_arrays (class loop *loop, bool &need_lc_ssa_update)
 
   need_lc_ssa_update |= mark_nontemporal_stores (loop, refs);
 
-  /* Step 4: what to prefetch?  */
-  if (!schedule_prefetches (refs, unroll_factor, ahead))
+  /* Step 4: what to prefetch?  With two levels each reference keeps both
+     its near and its far prefetch in flight.  */
+  if (!schedule_prefetches (refs, unroll_factor, ahead + far_ahead))
     goto fail;
 
   /* Step 5: unroll the loop.  TODO -- peeling of first and last few
@@ -1976,7 +2042,7 @@ loop_prefetch_arrays (class loop *loop, bool &need_lc_ssa_update)
     }
 
   /* Step 6: issue the prefetches.  */
-  issue_prefetches (refs, unroll_factor, ahead);
+  issue_prefetches (refs, unroll_factor, ahead, far_ahead);
 
 fail:
   release_mem_refs (refs);

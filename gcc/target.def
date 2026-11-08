@@ -2870,6 +2870,22 @@ number of memory accesses.",
  unsigned, (unsigned nunroll, class loop *loop),
  NULL)
 
+/* Two-level software prefetch distances, in cache lines.  */
+DEFHOOK
+(prefetch_distances,
+ "This target hook supplies two software prefetch distances for the loops\n\
+that @option{-fprefetch-loop-arrays} handles.  @var{nstreams} is the number\n\
+of memory streams the loop will prefetch, or zero when the pass has not\n\
+determined it yet.  On success the hook stores in @var{near} and @var{far}\n\
+the distances in cache lines, @var{far} the larger, and returns true: every\n\
+stream is then prefetched twice, @var{far} lines ahead with locality 2 (1\n\
+when nontemporal) and @var{near} lines ahead with locality 3 (0 when\n\
+nontemporal), and the trip count check uses @var{far} instead of the\n\
+latency-derived distance.  The default is @code{NULL}, which keeps a single\n\
+latency-derived prefetch distance.",
+ bool, (unsigned nstreams, unsigned *near, unsigned *far),
+ NULL)
+
 /* True if X is a legitimate MODE-mode immediate operand.  */
 DEFHOOK
 (legitimate_constant_p,
