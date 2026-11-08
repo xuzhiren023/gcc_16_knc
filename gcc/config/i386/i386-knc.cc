@@ -184,6 +184,12 @@ ix86_knc_stmt_cost (int kind, machine_mode mode, stmt_vec_info stmt)
       return COSTS_N_INSNS (1); /* CH masked_load/store.rt incl sparse.  */
     case unaligned_load:
     case unaligned_store:
+      /* A masked access of unknown alignment is a gather or scatter over
+	 one or two lines (knc_maskmove, S8-02).  C6: the gather tail of
+	 y = x + 1 costs about three scalar iterations against two for the
+	 aligned tail, so each weighs twice an unpack pair.  */
+      if (stmt && gimple_call_internal_p (stmt->stmt))
+	return COSTS_N_INSNS (4);
       return COSTS_N_INSNS (2); /* CH unpack.rt; E: store pair analogous.  */
     case scalar_to_vec:
     case vec_to_scalar:
@@ -427,19 +433,22 @@ ix86_knc_support_vector_misalignment (machine_mode mode, int misalignment,
          || (misalignment >= 0 && misalignment % bytes == 0);
 }
 
-/* S4-05, ADR-0007 point 7: ask for a masked epilogue only when each of
-   its masked moves will be one aligned line.  Every relevant access must
-   be contiguous, forward, and known 64-byte aligned without a peel: after
-   an alignment peel the epilogue's references have unknown misalignment
-   (PR 92351), and a misaligned masked access has no IMCI form yet.  */
+/* S4-05 / S8-02 (ADR-0007 point 7, ADR-0009 amendment 1 point 9): a masked
+   epilogue or a whole-loop mask is one aligned masked move per access
+   known 64-byte aligned and one gather or scatter per access of unknown
+   alignment (knc_maskmove), so every contiguous forward access
+   qualifies.  *ALIGNED reports whether every access is known 64-byte
+   aligned, which selects the C6 crossover against x87.  After an
+   alignment peel the epilogue's references have unknown misalignment
+   (PR 92351): they take the gather form, which is still correct.  */
 static const char *
-knc_masked_epilogue_rejection (loop_vec_info loop_vinfo)
+knc_masked_loop_rejection (loop_vec_info loop_vinfo, bool *aligned)
 {
+  *aligned = true;
   if (!ix86_knc_packed_mode_p (loop_vinfo->vector_mode))
     return "unsupported mode";
-  if (LOOP_VINFO_PEELING_FOR_ALIGNMENT (loop_vinfo) != 0
-      || LOOP_REQUIRES_VERSIONING_FOR_ALIGNMENT (loop_vinfo))
-    return "misaligned masked access: alignment after peeling is unknown";
+  if (LOOP_REQUIRES_VERSIONING_FOR_ALIGNMENT (loop_vinfo))
+    return "versioned for alignment";
   for (data_reference *dr : LOOP_VINFO_DATAREFS (loop_vinfo))
     {
       dr_vec_info *dr_info = loop_vinfo->lookup_dr (dr);
@@ -456,18 +465,66 @@ knc_masked_epilogue_rejection (loop_vec_info loop_vinfo)
 	  || TREE_CODE (DR_STEP (dr)) != INTEGER_CST
 	  || tree_int_cst_sgn (DR_STEP (dr)) < 0)
 	return "non-contiguous or backward masked access";
-      if (!vectype
-	  || dr_misalignment (dr_info, vectype) != 0
+      if (!vectype)
+	return "access without a vector type";
+      if (dr_misalignment (dr_info, vectype) != 0
 	  || !known_eq (DR_TARGET_ALIGNMENT (dr_info), 64U))
-	return "misaligned masked access: alignment not known to be 64 bytes";
+	*aligned = false;
     }
   return nullptr;
 }
 
+/* C6 in docs/research/knc-characterization.md, lengths 1-33 of y = x + 1:
+   the aligned masked tail beats the x87 loop from n = 2 at 1 and 4
+   threads per core; the gather tail beats it from n = 3 at 1 thread and
+   from n = 4 at 4 threads.  Scalar stays up to this many iterations.  2
+   and 3 threads were not measured and take the 4-thread value.  */
+static unsigned HOST_WIDE_INT
+knc_x87_tail_limit (bool aligned)
+{
+  if (aligned)
+    return 1;
+  return knc_threads_per_core == 1 ? 2 : 3;
+}
+
+/* The scalar iterations the full-vector loop leaves over when the trip
+   count is a compile-time constant, or -1 when it is not known here.  */
+static HOST_WIDE_INT
+knc_known_remainder (loop_vec_info loop_vinfo)
+{
+  if (!LOOP_VINFO_NITERS_KNOWN_P (loop_vinfo)
+      || LOOP_VINFO_PEELING_FOR_ALIGNMENT (loop_vinfo) < 0)
+    return -1;
+  HOST_WIDE_INT niters = (LOOP_VINFO_INT_NITERS (loop_vinfo)
+			  - LOOP_VINFO_PEELING_FOR_ALIGNMENT (loop_vinfo)
+			  - (LOOP_VINFO_PEELING_FOR_GAPS (loop_vinfo) ? 1 : 0));
+  return niters % LOOP_VINFO_VECT_FACTOR (loop_vinfo).to_constant ();
+}
+
+/* For ix86_vector_costs::finish_cost: ask for a masked epilogue unless a
+   known remainder is within C6's x87 limit (or there is none).  */
 bool
 ix86_knc_masked_epilogue_p (loop_vec_info loop_vinfo)
 {
-  return knc_masked_epilogue_rejection (loop_vinfo) == nullptr;
+  bool aligned;
+  if (knc_masked_loop_rejection (loop_vinfo, &aligned))
+    return false;
+  HOST_WIDE_INT rest = knc_known_remainder (loop_vinfo);
+  return rest < 0
+	 || (unsigned HOST_WIDE_INT) rest > knc_x87_tail_limit (aligned);
+}
+
+/* For ix86_vector_costs::finish_cost, on a main loop over partial vectors
+   with a known trip count: whether that count is within C6's x87 limit,
+   so that the whole-loop mask must lose.  KNC has no narrower vector mode,
+   so this replaces the generic rejection in favour of a narrower mode.  */
+bool
+ix86_knc_short_masked_loop_p (loop_vec_info loop_vinfo)
+{
+  bool aligned;
+  knc_masked_loop_rejection (loop_vinfo, &aligned);
+  return ((unsigned HOST_WIDE_INT) LOOP_VINFO_INT_NITERS (loop_vinfo)
+	  <= knc_x87_tail_limit (aligned));
 }
 
 /* Report costed candidates, not the vectorizer's eventual selection.  The
@@ -483,7 +540,10 @@ ix86_knc_report_loop (vec_info *vinfo, bool scalar_p)
 
   const dump_flags_t info = MSG_OPTIMIZED_LOCATIONS | MSG_PRIORITY_USER_FACING;
   const dump_flags_t missed = MSG_MISSED_OPTIMIZATION | MSG_PRIORITY_USER_FACING;
-  const char *reason = knc_masked_epilogue_rejection (loop_vinfo);
+  bool aligned;
+  const char *reason = knc_masked_loop_rejection (loop_vinfo, &aligned);
+  HOST_WIDE_INT rest = knc_known_remainder (loop_vinfo);
+  unsigned HOST_WIDE_INT limit = knc_x87_tail_limit (aligned);
   unsigned HOST_WIDE_INT vf = LOOP_VINFO_VECT_FACTOR (loop_vinfo).to_constant ();
   dump_printf_loc (info, vect_location,
 		   "KNC candidate mode %s, factor = %wu (%s loop)\n",
@@ -503,11 +563,16 @@ ix86_knc_report_loop (vec_info *vinfo, bool scalar_p)
       dump_printf_loc (missed, vect_location,
 		       "KNC rejected masked epilogue candidate: %s\n", reason);
     }
+  else if (rest >= 0 && (unsigned HOST_WIDE_INT) rest <= limit)
+    dump_printf_loc (info, vect_location,
+		     "KNC candidate scalar epilogue: known remainder %wd "
+		     "within the x87 limit %wu (C6)\n", rest, limit);
   else
     dump_printf_loc (info, vect_location,
-		     "KNC candidate masked epilogue eligible: every access "
-		     "64-byte aligned; generic profitability and operation "
-		     "support still apply\n");
+		     "KNC candidate masked epilogue eligible: %s; generic "
+		     "profitability and operation support still apply\n",
+		     aligned ? "every access 64-byte aligned"
+		     : "alignment unknown, a gather or scatter per access");
 
   unsigned gathers = 0, scatters = 0, converting = 0, masks = 0;
   for (data_reference *dr : LOOP_VINFO_DATAREFS (loop_vinfo))

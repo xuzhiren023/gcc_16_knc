@@ -26857,11 +26857,12 @@ ix86_vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
       if (cost >= 0)
         stmt_cost = cost;
     }
-  /* ADR-0007 point 7: KNC masked accesses are 64-byte aligned only.  */
+  /* ADR-0009 amendment 1 point 9: a KNC masked access of unknown
+     alignment is a gather or scatter.  */
   if (TARGET_KNC && ix86_knc_packed_mode_p (mode)
       && (kind == unaligned_load || kind == unaligned_store)
       && stmt_info && gimple_call_internal_p (stmt_info->stmt))
-    stmt_cost *= 1000;
+    stmt_cost = ix86_knc_stmt_cost (kind, mode, stmt_info);
   /* ADR-0008 point 1: a two-input KNC permute is vpermd plus vpermd.  */
   if (TARGET_KNC && kind == vec_perm
       && ix86_knc_two_input_perm_p (mode, stmt_info, node))
@@ -26990,8 +26991,9 @@ ix86_vector_costs::finish_cost (const vector_costs *scalar_costs)
       if (LOOP_VINFO_USING_PARTIAL_VECTORS_P (loop_vinfo)
 	  && !LOOP_VINFO_EPILOGUE_P (loop_vinfo)
 	  && LOOP_VINFO_NITERS_KNOWN_P (loop_vinfo)
-	  && (exact_log2 (LOOP_VINFO_VECT_FACTOR (loop_vinfo).to_constant ())
-	      > ceil_log2 (LOOP_VINFO_INT_NITERS (loop_vinfo))))
+	  && (TARGET_KNC ? ix86_knc_short_masked_loop_p (loop_vinfo)
+	      : (exact_log2 (LOOP_VINFO_VECT_FACTOR (loop_vinfo).to_constant ())
+		 > ceil_log2 (LOOP_VINFO_INT_NITERS (loop_vinfo)))))
 	m_costs[vect_body] = INT_MAX;
 
       /* We'd like to avoid using masking if there's an in-order reduction
@@ -27074,7 +27076,8 @@ ix86_vector_costs::finish_cost (const vector_costs *scalar_costs)
     {
       bool avoid = false;
       if (LOOP_VINFO_NITERS_KNOWN_P (loop_vinfo)
-	  && LOOP_VINFO_PEELING_FOR_ALIGNMENT (loop_vinfo) >= 0)
+	  && LOOP_VINFO_PEELING_FOR_ALIGNMENT (loop_vinfo) >= 0
+	  && !TARGET_KNC)
 	{
 	  unsigned int peel_niter
 	    = LOOP_VINFO_PEELING_FOR_ALIGNMENT (loop_vinfo);
