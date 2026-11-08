@@ -449,6 +449,21 @@ idx_analyze_ref (tree base, tree *index, void *data)
       idelta = int_cst_value (TREE_OPERAND (ibase, 1));
       ibase = TREE_OPERAND (ibase, 0);
     }
+  /* The vectorizer gives each access its own pointer, initialized outside
+     the loop as the array plus a constant.  Fold those constants into the
+     delta so that x[i-1], x[i] and x[i+1] fall into one group and share a
+     prefetch, as they do when the loop is not vectorized.  */
+  while (TREE_CODE (ibase) == SSA_NAME)
+    {
+      gimple *def = SSA_NAME_DEF_STMT (ibase);
+      if (!is_gimple_assign (def)
+	  || gimple_assign_rhs_code (def) != POINTER_PLUS_EXPR
+	  || !cst_and_fits_in_hwi (gimple_assign_rhs2 (def))
+	  || flow_bb_inside_loop_p (ar_data->loop, gimple_bb (def)))
+	break;
+      idelta += int_cst_value (gimple_assign_rhs2 (def));
+      ibase = gimple_assign_rhs1 (def);
+    }
   if (cst_and_fits_in_hwi (ibase))
     {
       idelta += int_cst_value (ibase);
