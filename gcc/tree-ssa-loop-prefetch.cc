@@ -1931,6 +1931,87 @@ trip_count_to_ahead_ratio_too_small_p (unsigned ahead, HOST_WIDE_INT est_niter)
   return false;
 }
 
+/* A target with two-level prefetch distances (TARGET_PREFETCH_DISTANCES)
+   prefetches a loop whose trip count is known only at run time behind a
+   guard: LOOP is versioned on its trip count, so that the prefetched copy,
+   LOOP itself, runs only when the loop iterates at least
+   TRIP_COUNT_TO_AHEAD_RATIO times its far distance FAR_AHEAD, and the other
+   copy, the loop as it was, runs otherwise (a loop of one vector iteration
+   paid four prefetches and their address updates, 1.3x).  Returns true if
+   LOOP may be prefetched: its trip count is a compile-time constant, which
+   trip_count_to_ahead_ratio_too_small_p has already checked, or it was
+   versioned, and then *VERSIONED is set.  Without a trip count from the
+   loop's single exit no guard can be built and the loop is not prefetched.
+   The guard chooses only between two copies that compute the same values,
+   so the exit condition's may_be_zero case need not enter it.  */
+
+static bool
+version_loop_for_prefetch (class loop *loop, unsigned far_ahead,
+			   bool *versioned)
+{
+  edge exit = single_exit (loop);
+  class tree_niter_desc niter;
+  tree type, cond;
+  gimple_seq stmts = NULL;
+  unsigned HOST_WIDE_INT min_niter;
+
+  if (!exit
+      || !number_of_iterations_exit (loop, exit, &niter, false)
+      || contains_abnormal_ssa_name_p (niter.niter))
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Not prefetching -- trip count unknown and no "
+		 "guard on it\n");
+      return false;
+    }
+  if (TREE_CODE (niter.niter) == INTEGER_CST)
+    return true;
+
+  /* NITER.NITER is one less than the number of times the body runs.  */
+  type = TREE_TYPE (niter.niter);
+  min_niter = (unsigned HOST_WIDE_INT) TRIP_COUNT_TO_AHEAD_RATIO * far_ahead - 1;
+  if (!INTEGRAL_TYPE_P (type)
+      || !TYPE_UNSIGNED (type)
+      || (tree_fits_uhwi_p (TYPE_MAX_VALUE (type))
+	  && tree_to_uhwi (TYPE_MAX_VALUE (type)) < min_niter))
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Not prefetching -- the trip count cannot reach "
+		 HOST_WIDE_INT_PRINT_UNSIGNED " iterations\n", min_niter + 1);
+      return false;
+    }
+
+  cond = fold_build2 (GE_EXPR, boolean_type_node, unshare_expr (niter.niter),
+		      build_int_cst (type, min_niter));
+  if (integer_nonzerop (cond))
+    return true;
+  if (integer_zerop (cond))
+    {
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Not prefetching -- the loop never runs "
+		 HOST_WIDE_INT_PRINT_UNSIGNED " iterations\n", min_niter + 1);
+      return false;
+    }
+
+  cond = force_gimple_operand_1 (cond, &stmts, is_gimple_condexpr_for_cond,
+				 NULL_TREE);
+  if (stmts)
+    gsi_insert_seq_on_edge_immediate (loop_preheader_edge (loop), stmts);
+  /* A loop that gets this far usually iterates a lot.  */
+  loop_version (loop, cond, NULL,
+		profile_probability::likely (),
+		profile_probability::unlikely (),
+		profile_probability::likely (),
+		profile_probability::unlikely (), true);
+  update_ssa (TODO_update_ssa_no_phi);
+  *versioned = true;
+  if (dump_file && (dump_flags & TDF_DETAILS))
+    fprintf (dump_file, "Versioned loop %d: the prefetched copy runs when "
+	     "it iterates at least " HOST_WIDE_INT_PRINT_UNSIGNED " times\n",
+	     loop->num, min_niter + 1);
+  return true;
+}
+
 /* Determine whether or not the number of memory references in the loop is
    reasonable based on the profitablity and compilation time considerations.
    NINSNS: estimated number of instructions in the loop,
@@ -2013,8 +2094,9 @@ insn_to_prefetch_ratio_too_small_p (unsigned ninsns, unsigned prefetch_count,
 
 
 /* Issue prefetch instructions for array references in LOOP.  Returns
-   true if the LOOP was unrolled and updates NEED_LC_SSA_UPDATE if we need
-   to update SSA for virtual operands and LC SSA for a split edge.  */
+   true if the LOOP was unrolled or versioned and updates NEED_LC_SSA_UPDATE
+   if we need to update SSA for virtual operands and LC SSA for a split
+   edge.  */
 
 static bool
 loop_prefetch_arrays (class loop *loop, bool &need_lc_ssa_update)
@@ -2022,7 +2104,7 @@ loop_prefetch_arrays (class loop *loop, bool &need_lc_ssa_update)
   struct mem_ref_group *refs;
   unsigned ahead, ninsns, time, unroll_factor;
   unsigned far_ahead = 0, near, far;
-  bool two_level;
+  bool two_level, versioned = false;
   HOST_WIDE_INT est_niter;
   class tree_niter_desc desc;
   bool unrolled = false, no_other_refs;
@@ -2112,6 +2194,13 @@ loop_prefetch_arrays (class loop *loop, bool &need_lc_ssa_update)
   if (!schedule_prefetches (refs, unroll_factor, ahead + far_ahead))
     goto fail;
 
+  /* With two levels a loop whose trip count is known only at run time is
+     versioned on it once every check has passed: the prefetched copy runs
+     when the loop runs at least TRIP_COUNT_TO_AHEAD_RATIO far distances, the
+     other copy is the loop as it was.  */
+  if (two_level && !version_loop_for_prefetch (loop, far_ahead, &versioned))
+    goto fail;
+
   /* Step 5: unroll the loop.  TODO -- peeling of first and last few
      iterations so that we do not issue superfluous prefetches.  */
   if (unroll_factor != 1)
@@ -2125,7 +2214,7 @@ loop_prefetch_arrays (class loop *loop, bool &need_lc_ssa_update)
 
 fail:
   release_mem_refs (refs);
-  return unrolled;
+  return unrolled || versioned;
 }
 
 /* Issue prefetch instructions for array references in loops.  */

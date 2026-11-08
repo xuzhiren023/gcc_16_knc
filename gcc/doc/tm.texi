@@ -12643,8 +12643,11 @@ the distances in cache lines, @var{far} the larger, and returns true: every
 stream is then prefetched twice, @var{far} lines ahead with locality 2 (1
 when nontemporal) and @var{near} lines ahead with locality 3 (0 when
 nontemporal), and the trip count check uses @var{far} instead of the
-latency-derived distance.  The default is @code{NULL}, which keeps a single
-latency-derived prefetch distance.
+latency-derived distance.  A loop whose trip count is known only at run
+time is versioned on it: the prefetched copy runs when the loop iterates at
+least four times @var{far}, the other copy is the loop unchanged.  The
+default is @code{NULL}, which keeps a single latency-derived prefetch
+distance.
 @end deftypefn
 
 @defmac POWI_MAX_MULTS

@@ -2881,8 +2881,11 @@ the distances in cache lines, @var{far} the larger, and returns true: every\n\
 stream is then prefetched twice, @var{far} lines ahead with locality 2 (1\n\
 when nontemporal) and @var{near} lines ahead with locality 3 (0 when\n\
 nontemporal), and the trip count check uses @var{far} instead of the\n\
-latency-derived distance.  The default is @code{NULL}, which keeps a single\n\
-latency-derived prefetch distance.",
+latency-derived distance.  A loop whose trip count is known only at run\n\
+time is versioned on it: the prefetched copy runs when the loop iterates at\n\
+least four times @var{far}, the other copy is the loop unchanged.  The\n\
+default is @code{NULL}, which keeps a single latency-derived prefetch\n\
+distance.",
  bool, (unsigned nstreams, unsigned *near, unsigned *far),
  NULL)
 
