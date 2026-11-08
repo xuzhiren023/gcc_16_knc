@@ -805,23 +805,34 @@ LIBGFOR_CHECK_UNLINK_OPEN_FILE
 # Check whether line terminator is LF or CRLF
 LIBGFOR_CHECK_CRLF
 
-# Check whether we support AVX extensions
-LIBGFOR_CHECK_AVX
+case "${host_cpu}" in
+  k1om)
+    # KNC (k1om) has x87 and IMCI only: no SSE, AVX or FMA.  The compiler
+    # rejects their options, but the x86 matmul variants and their CPU
+    # dispatch must stay out of this runtime by configuration, not by
+    # luck of a failed probe.
+    AM_CONDITIONAL([HAVE_AVX128],false)
+    ;;
+  *)
+    # Check whether we support AVX extensions
+    LIBGFOR_CHECK_AVX
 
-# Check whether we support AVX2 extensions
-LIBGFOR_CHECK_AVX2
+    # Check whether we support AVX2 extensions
+    LIBGFOR_CHECK_AVX2
 
-# Check whether we support AVX512f extensions
-LIBGFOR_CHECK_AVX512F
+    # Check whether we support AVX512f extensions
+    LIBGFOR_CHECK_AVX512F
 
-# Check for FMA3 extensions
-LIBGFOR_CHECK_FMA3
+    # Check for FMA3 extensions
+    LIBGFOR_CHECK_FMA3
 
-# Check for FMA4 extensions
-LIBGFOR_CHECK_FMA4
+    # Check for FMA4 extensions
+    LIBGFOR_CHECK_FMA4
 
-# Check if AVX128 works
-LIBGFOR_CHECK_AVX128
+    # Check if AVX128 works
+    LIBGFOR_CHECK_AVX128
+    ;;
+esac
 
 # Determine what GCC version number to use in filesystem paths.
 GCC_BASE_VER
