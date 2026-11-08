@@ -624,7 +624,7 @@ ix86_knc_report_loop (vec_info *vinfo, bool scalar_p)
 	    tree decl = gimple_call_fndecl (stmt);
 	    if (decl)
 	      dump_printf_loc (info, stmt,
-			       "KNC candidate body call %qD "
+			       "KNC candidate body call %T "
 			       "(before target lowering)\n", decl);
 	    else
 	      dump_printf_loc (info, stmt,
