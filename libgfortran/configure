@@ -32351,7 +32351,23 @@ $as_echo "#define HAVE_CRLF 1" >>confdefs.h
 
 fi
 
-# Check whether we support AVX extensions
+case "${host_cpu}" in
+  k1om)
+    # KNC (k1om) has x87 and IMCI only: no SSE, AVX or FMA.  The compiler
+    # rejects their options, but the x86 matmul variants and their CPU
+    # dispatch must stay out of this runtime by configuration, not by
+    # luck of a failed probe.
+     if false; then
+  HAVE_AVX128_TRUE=
+  HAVE_AVX128_FALSE='#'
+else
+  HAVE_AVX128_TRUE='#'
+  HAVE_AVX128_FALSE=
+fi
+
+    ;;
+  *)
+    # Check whether we support AVX extensions
 
   ac_save_CFLAGS="$CFLAGS"
   CFLAGS="-O2 -mavx"
@@ -32379,7 +32395,7 @@ rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
   CFLAGS="$ac_save_CFLAGS"
 
 
-# Check whether we support AVX2 extensions
+    # Check whether we support AVX2 extensions
 
   ac_save_CFLAGS="$CFLAGS"
   CFLAGS="-O2 -mavx2"
@@ -32409,7 +32425,7 @@ rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
   CFLAGS="$ac_save_CFLAGS"
 
 
-# Check whether we support AVX512f extensions
+    # Check whether we support AVX512f extensions
 
   ac_save_CFLAGS="$CFLAGS"
   CFLAGS="-O2 -mavx512f"
@@ -32445,7 +32461,7 @@ rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
   CFLAGS="$ac_save_CFLAGS"
 
 
-# Check for FMA3 extensions
+    # Check for FMA3 extensions
 
   ac_save_CFLAGS="$CFLAGS"
   CFLAGS="-O2 -mfma -mno-fma4"
@@ -32477,7 +32493,7 @@ rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
   CFLAGS="$ac_save_CFLAGS"
 
 
-# Check for FMA4 extensions
+    # Check for FMA4 extensions
 
   ac_save_CFLAGS="$CFLAGS"
   CFLAGS="-O2 -mfma4 -mno-fma"
@@ -32509,7 +32525,7 @@ rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
   CFLAGS="$ac_save_CFLAGS"
 
 
-# Check if AVX128 works
+    # Check if AVX128 works
 
   ac_save_CFLAGS="$CFLAGS"
   CFLAGS="-O2 -mavx -mprefer-avx128"
@@ -32552,6 +32568,8 @@ fi
 rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
   CFLAGS="$ac_save_CFLAGS"
 
+    ;;
+esac
 
 # Determine what GCC version number to use in filesystem paths.
 
@@ -32838,6 +32856,10 @@ Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
 if test -z "${IEEE_SUPPORT_TRUE}" && test -z "${IEEE_SUPPORT_FALSE}"; then
   as_fn_error $? "conditional \"IEEE_SUPPORT\" was never defined.
+Usually this means the macro was only invoked conditionally." "$LINENO" 5
+fi
+if test -z "${HAVE_AVX128_TRUE}" && test -z "${HAVE_AVX128_FALSE}"; then
+  as_fn_error $? "conditional \"HAVE_AVX128\" was never defined.
 Usually this means the macro was only invoked conditionally." "$LINENO" 5
 fi
 if test -z "${HAVE_AVX128_TRUE}" && test -z "${HAVE_AVX128_FALSE}"; then
