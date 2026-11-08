@@ -479,11 +479,9 @@ knc_masked_loop_rejection (loop_vec_info loop_vinfo, bool *aligned)
    the aligned masked tail beats the x87 loop from n = 2 at 1 and 4
    threads per core; the gather tail beats it from n = 3 at 1 thread and
    from n = 4 at 4 threads.  Scalar stays up to this many iterations.  2
-   and 3 threads were not measured and take the 4-thread value.  The
-   knc_maskmove expander applies the unaligned limit at run time to a mask
-   the compiler cannot count (round 1).  */
-unsigned HOST_WIDE_INT
-ix86_knc_x87_tail_limit (bool aligned)
+   and 3 threads were not measured and take the 4-thread value.  */
+static unsigned HOST_WIDE_INT
+knc_x87_tail_limit (bool aligned)
 {
   if (aligned)
     return 1;
@@ -514,7 +512,7 @@ ix86_knc_masked_epilogue_p (loop_vec_info loop_vinfo)
     return false;
   HOST_WIDE_INT rest = knc_known_remainder (loop_vinfo);
   return rest < 0
-	 || (unsigned HOST_WIDE_INT) rest > ix86_knc_x87_tail_limit (aligned);
+	 || (unsigned HOST_WIDE_INT) rest > knc_x87_tail_limit (aligned);
 }
 
 /* For ix86_vector_costs::finish_cost, on a loop over partial vectors with
@@ -536,7 +534,7 @@ ix86_knc_short_masked_loop_p (loop_vec_info loop_vinfo)
       if (niters < 0)
 	return false;
     }
-  return (unsigned HOST_WIDE_INT) niters <= ix86_knc_x87_tail_limit (aligned);
+  return (unsigned HOST_WIDE_INT) niters <= knc_x87_tail_limit (aligned);
 }
 
 /* Report costed candidates, not the vectorizer's eventual selection.  The
@@ -555,7 +553,7 @@ ix86_knc_report_loop (vec_info *vinfo, bool scalar_p)
   bool aligned;
   const char *reason = knc_masked_loop_rejection (loop_vinfo, &aligned);
   HOST_WIDE_INT rest = knc_known_remainder (loop_vinfo);
-  unsigned HOST_WIDE_INT limit = ix86_knc_x87_tail_limit (aligned);
+  unsigned HOST_WIDE_INT limit = knc_x87_tail_limit (aligned);
   unsigned HOST_WIDE_INT vf = LOOP_VINFO_VECT_FACTOR (loop_vinfo).to_constant ();
   dump_printf_loc (info, vect_location,
 		   "KNC candidate mode %s, factor = %wu (%s loop)\n",

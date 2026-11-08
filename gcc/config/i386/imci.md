@@ -1188,43 +1188,6 @@
    (set_attr "length_immediate" "1")
    (set_attr "mode" "XI")])
 
-;; One lane of a masked contiguous access of unknown line alignment (S8-02
-;; round 1): VLOADUNPACKL / VPACKSTOREL (Intel 327364-001) with a
-;; single-lane mask at the element's own address.  The unpack moves the
-;; first memory element into the lowest active lane, so lane J at A + J *
-;; size is a maskload or maskstore of that lane; the low half touches only
-;; the line holding A + J * size, and that element is active, so no line
-;; outside the object is touched.  The mask itself suppresses nothing
-;; (S3-03): the expander branches on the lane bit first.  The memory
-;; operand is the element, which keeps the alias information exact.
-;; Operand 2 of the load is the merge input, tied.
-(define_c_enum "unspec" [UNSPEC_KNC_LANE])
-
-(define_insn "knc_lane_load<mode>"
-  [(set (match_operand:KNC_PACKED 0 "register_operand" "=YJ")
-	(unspec:KNC_PACKED
-	  [(match_operand:<knc_packed_scalar> 1 "memory_operand" "m")
-	   (match_operand:KNC_PACKED 2 "register_operand" "0")
-	   (match_operand:HI 3 "register_operand" "YL")]
-	  UNSPEC_KNC_LANE))]
-  "TARGET_KNC && ix86_knc_element_aligned_mem_p (operands[1], <MODE>mode)"
-  "vloadunpackl<knc_packed_pair>\t%1, %g0%{%3%}"
-  [(set_attr "type" "ssemov")
-   (set_attr "memory" "load")
-   (set_attr "mode" "XI")])
-
-(define_insn "knc_lane_store<mode>"
-  [(set (match_operand:<knc_packed_scalar> 0 "memory_operand" "=m")
-	(unspec:<knc_packed_scalar>
-	  [(match_operand:KNC_PACKED 1 "register_operand" "YJ")
-	   (match_operand:HI 2 "register_operand" "YL")]
-	  UNSPEC_KNC_LANE))]
-  "TARGET_KNC && ix86_knc_element_aligned_mem_p (operands[0], <MODE>mode)"
-  "vpackstorel<knc_packed_pair>\t%g1, %0%{%2%}"
-  [(set_attr "type" "ssemov")
-   (set_attr "memory" "store")
-   (set_attr "mode" "XI")])
-
 ;; maskload (operand 1 is memory, else value zero) and maskstore (operand 0
 ;; is memory) for the shared sse.md expanders, which may not FAIL.  A
 ;; 64-byte aligned access is one masked move behind an empty-mask guard:
@@ -1239,18 +1202,9 @@
 ;; retry loop lives in the knc_gather/knc_scatter insn.  A QI mask is
 ;; zero-extended through a GPR so that the 16-bit completion test sees
 ;; clear bits 15:8.  This replaced the S4-14 line split (two aligned masked
-;; moves behind GPR tests and a vpermd rotation).
-;; Round 1 (C6: the gather tail loses to x87 up to ix86_knc_x87_tail_limit
-;; lanes, 3 at the default density): the gather or scatter is taken only
-;; when the mask's zero-extended value is at least 1 << limit.  Below it
-;; every active lane is one of lanes 0 to limit - 1 (every while_ult
-;; prefix of at most limit lanes is such a mask; KNC has no popcnt, so this
-;; range test stands in for the lane count), and each of those lanes moves
-;; through knc_lane_load/store behind a test of its bit, so an empty mask
-;; still touches nothing.  Arithmetic stays one masked vector op; the
-;; vectorizer's constant masks fold the branch.  An address below element
-;; alignment keeps the fallback that moves each active element through a
-;; GPR, touching nothing the scalar loop does not.
+;; moves behind GPR tests and a vpermd rotation).  An address below
+;; element alignment keeps the fallback that moves each active element
+;; through a GPR, touching nothing the scalar loop does not.
 (define_expand "@knc_maskmove<mode>"
   [(match_operand:KNC_PACKED 0 "nonimmediate_operand")
    (match_operand:KNC_PACKED 1 "nonimmediate_operand")
@@ -1279,42 +1233,19 @@
     }
   else if (ix86_knc_element_aligned_mem_p (mem, <MODE>mode))
     {
-      unsigned int size = GET_MODE_UNIT_SIZE (<MODE>mode);
-      unsigned int limit = ix86_knc_x87_tail_limit (false);
-      rtx bits = force_reg (SImode, convert_to_mode (SImode, mask, 1));
-      rtx vector = gen_label_rtx ();
-      rtx done = gen_label_rtx ();
-      if (!load)
-	data = force_reg (<MODE>mode, data);
-      emit_cmp_and_jump_insns (bits, GEN_INT (HOST_WIDE_INT_1U << limit), GEU,
-			       NULL_RTX, SImode, 1, vector);
-      for (unsigned int i = 0; i < limit; i++)
-	{
-	  rtx next = gen_label_rtx ();
-	  rtx bit = expand_simple_binop (SImode, AND, bits, GEN_INT (1u << i),
-					 NULL_RTX, 1, OPTAB_DIRECT);
-	  emit_cmp_and_jump_insns (bit, const0_rtx, EQ, NULL_RTX, SImode, 1,
-				   next);
-	  /* The lane's bit is its single-lane mask.  */
-	  rtx lane = gen_reg_rtx (HImode);
-	  emit_move_insn (lane, gen_lowpart (HImode, force_reg (SImode, bit)));
-	  rtx elem = adjust_address (mem, <knc_packed_scalar>mode, i * size);
-	  if (load)
-	    emit_insn (gen_knc_lane_load<mode> (data, elem, data, lane));
-	  else
-	    emit_insn (gen_knc_lane_store<mode> (elem, data, lane));
-	  emit_label (next);
-	}
-      emit_jump_insn (gen_jump (done));
-      emit_barrier ();
-      emit_label (vector);
       rtx base = force_reg (Pmode, XEXP (mem, 0));
       rtx iota = force_reg (V16SImode, gen_const_vec_series (V16SImode,
 							     const0_rtx,
 							     const1_rtx));
-      rtx scale = GEN_INT (size);
+      rtx scale = GEN_INT (GET_MODE_UNIT_SIZE (<MODE>mode));
       rtx k = gen_reg_rtx (HImode);
-      emit_move_insn (k, gen_lowpart (HImode, bits));
+      if (<knc_maskmode>mode == HImode)
+	emit_move_insn (k, mask);
+      else
+	emit_move_insn (k, gen_lowpart (HImode,
+					force_reg (SImode,
+						   convert_to_mode (SImode,
+								    mask, 1))));
       if (load)
 	{
 	  rtx addr = gen_rtx_UNSPEC (DImode, gen_rtvec (3, base, iota, scale),
@@ -1328,10 +1259,11 @@
 	  rtx addr = gen_rtx_UNSPEC (DImode,
 				     gen_rtvec (4, base, iota, scale, k),
 				     UNSPEC_KNC_VSIBADDR);
-	  emit_insn (gen_knc_scatter<mode> (base, iota, scale, data, NULL_RTX,
-					    gen_rtx_MEM (BLKmode, addr), k));
+	  emit_insn (gen_knc_scatter<mode> (base, iota, scale,
+					    force_reg (<MODE>mode, data),
+					    NULL_RTX, gen_rtx_MEM (BLKmode, addr),
+					    k));
 	}
-      emit_label (done);
     }
   else
     {
