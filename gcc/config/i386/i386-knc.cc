@@ -40,6 +40,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "diagnostic-core.h"
 #include "optabs.h"
 #include "cpplib.h"
+#include "opts.h"
 #include "targhooks.h"
 #include "fold-const.h"
 #include "gimple.h"
