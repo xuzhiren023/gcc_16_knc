@@ -3180,6 +3180,8 @@ ix86_option_override_internal (bool main_args_p,
      profitable generally so leave it disabled until we get more
      fine grained control & costing.  */
   SET_OPTION_IF_UNSET (opts, opts_set, param_vect_partial_vector_usage, 0);
+  if (TARGET_KNC_P (opts->x_ix86_isa_flags))
+    ix86_knc_vectorizer_params (opts, opts_set);
 
   return true;
 }

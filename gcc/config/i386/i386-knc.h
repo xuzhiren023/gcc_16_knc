@@ -53,6 +53,7 @@ extern void ix86_knc_expand_duplicate (rtx, rtx);
 extern bool ix86_knc_expand_mask_vec_cmp (rtx, enum rtx_code, rtx, rtx);
 extern void ix86_knc_report_loop (class vec_info *, bool);
 extern bool ix86_knc_masked_epilogue_p (class _loop_vec_info *);
+extern bool ix86_knc_short_masked_loop_p (class _loop_vec_info *);
 extern bool ix86_knc_vectorize_vec_perm_const (machine_mode, machine_mode, rtx,
 					       rtx, rtx,
 					       const vec_perm_indices &);
@@ -73,6 +74,8 @@ extern HARD_REG_SET ix86_knc_zero_call_used_regs (HARD_REG_SET);
 extern enum processor_type ix86_knc_target_macros
   (struct cpp_reader *, void (*) (struct cpp_reader *, const char *));
 extern bool ix86_knc_option_override (struct gcc_options *);
+extern void ix86_knc_vectorizer_params (struct gcc_options *,
+					struct gcc_options *);
 extern bool ix86_knc_check_abi_type (const_tree, machine_mode);
 extern tree ix86_knc_va_arg_error (tree);
 extern bool ix86_knc_check_abi_mode (machine_mode, bool);
