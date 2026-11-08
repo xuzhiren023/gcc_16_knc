@@ -74,6 +74,8 @@ extern HARD_REG_SET ix86_knc_zero_call_used_regs (HARD_REG_SET);
 extern enum processor_type ix86_knc_target_macros
   (struct cpp_reader *, void (*) (struct cpp_reader *, const char *));
 extern bool ix86_knc_option_override (struct gcc_options *);
+extern void ix86_knc_vectorizer_params (struct gcc_options *,
+					struct gcc_options *);
 extern bool ix86_knc_check_abi_type (const_tree, machine_mode);
 extern tree ix86_knc_va_arg_error (tree);
 extern bool ix86_knc_check_abi_mode (machine_mode, bool);

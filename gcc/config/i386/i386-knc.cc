@@ -981,6 +981,23 @@ ix86_knc_option_override (struct gcc_options *opts)
   return true;
 }
 
+/* S8-02, ADR-0009 amendment 1 point 9, after the generic x86 parameter
+   defaults.  C6 (knc-characterization.md): a scalar peel to alignment
+   loses to the gather tail at every length 1-33, and a trip count below
+   the vector length is a whole-loop mask, not an x87 loop.  So no scalar
+   alignment peel, and partial vectors for the epilogue and for loops the
+   vectorizer knows to be shorter than one vector (usage 1); the masked
+   epilogue itself is still requested from finish_cost.  A user setting
+   wins, as with the generic default.  */
+void
+ix86_knc_vectorizer_params (struct gcc_options *opts,
+			    struct gcc_options *opts_set)
+{
+  SET_OPTION_IF_UNSET (opts, opts_set, param_vect_partial_vector_usage, 1);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_vect_max_peeling_for_alignment,
+		       0);
+}
+
 /* KNC scalar transport admits XImode, but its packed vector ABI belongs
    to E3.  Reject these vector types before recursive ABI classification.  */
 bool
