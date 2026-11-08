@@ -637,6 +637,8 @@ am__EXEEXT_TRUE
 LTLIBOBJS
 LIBOBJS
 get_gcc_base_ver
+LIBGFOR_RUNTIME_GUARD_FILE
+LIBGFOR_RUNTIME_GUARD
 HAVE_AVX128_FALSE
 HAVE_AVX128_TRUE
 tmake_file
@@ -13245,7 +13247,7 @@ else
   lt_dlunknown=0; lt_dlno_uscore=1; lt_dlneed_uscore=2
   lt_status=$lt_dlunknown
   cat > conftest.$ac_ext <<_LT_EOF
-#line 13248 "configure"
+#line 13250 "configure"
 #include "confdefs.h"
 
 #if HAVE_DLFCN_H
@@ -13351,7 +13353,7 @@ else
   lt_dlunknown=0; lt_dlno_uscore=1; lt_dlneed_uscore=2
   lt_status=$lt_dlunknown
   cat > conftest.$ac_ext <<_LT_EOF
-#line 13354 "configure"
+#line 13356 "configure"
 #include "confdefs.h"
 
 #if HAVE_DLFCN_H
@@ -32365,6 +32367,12 @@ else
   HAVE_AVX128_FALSE=
 fi
 
+
+    # The card and its MPSS toolchain carry the GCC 5 libgfortran.so.3.
+    # libgfortran.spec names an implicit linker script that fails a link
+    # whose -lgfortran resolved to that older runtime (config/guard-knc.ld).
+    LIBGFOR_RUNTIME_GUARD=' libgfortran-knc.ld%s'
+    LIBGFOR_RUNTIME_GUARD_FILE=libgfortran-knc.ld
     ;;
   *)
     # Check whether we support AVX extensions
@@ -32570,6 +32578,9 @@ rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
 
     ;;
 esac
+
+
+
 
 # Determine what GCC version number to use in filesystem paths.
 

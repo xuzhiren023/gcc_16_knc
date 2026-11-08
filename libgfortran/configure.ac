@@ -812,6 +812,12 @@ case "${host_cpu}" in
     # dispatch must stay out of this runtime by configuration, not by
     # luck of a failed probe.
     AM_CONDITIONAL([HAVE_AVX128],false)
+
+    # The card and its MPSS toolchain carry the GCC 5 libgfortran.so.3.
+    # libgfortran.spec names an implicit linker script that fails a link
+    # whose -lgfortran resolved to that older runtime (config/guard-knc.ld).
+    LIBGFOR_RUNTIME_GUARD=' libgfortran-knc.ld%s'
+    LIBGFOR_RUNTIME_GUARD_FILE=libgfortran-knc.ld
     ;;
   *)
     # Check whether we support AVX extensions
@@ -833,6 +839,9 @@ case "${host_cpu}" in
     LIBGFOR_CHECK_AVX128
     ;;
 esac
+
+AC_SUBST(LIBGFOR_RUNTIME_GUARD)
+AC_SUBST(LIBGFOR_RUNTIME_GUARD_FILE)
 
 # Determine what GCC version number to use in filesystem paths.
 GCC_BASE_VER

@@ -49,14 +49,15 @@ LTLDFLAGS = $(shell $(SHELL) $(top_srcdir)/../libtool-ldflags $(LDFLAGS)) \
 	    $(lt_host_flags)
 
 toolexeclib_LTLIBRARIES = libgfortran.la
-toolexeclib_DATA = libgfortran.spec
+toolexeclib_DATA = libgfortran.spec $(LIBGFOR_RUNTIME_GUARD_FILE)
 libgfortran_la_LINK = $(LINK) $(libgfortran_la_LDFLAGS)
 libgfortran_la_LDFLAGS = -version-info `grep -v '^\#' $(srcdir)/libtool-version` \
 	$(LTLDFLAGS) $(LIBQUADLIB) ../libbacktrace/libbacktrace.la \
 	$(HWCAP_LDFLAGS) \
 	$(LIBM) $(extra_darwin_ldflags_libgfortran) \
 	$(version_arg) -Wc,-shared-libgcc
-libgfortran_la_DEPENDENCIES = $(version_dep) libgfortran.spec $(LIBQUADLIB_DEP)
+libgfortran_la_DEPENDENCIES = $(version_dep) libgfortran.spec $(LIBGFOR_RUNTIME_GUARD_FILE) \
+	$(LIBQUADLIB_DEP)
 
 libcaf_shared_DEPS = caf/libcaf.h caf/caf_error.h
 libcaf_shared_SRCS = caf/caf_error.c
@@ -1144,6 +1145,10 @@ fpu-target.h: $(srcdir)/$(FPU_HOST_HEADER)
 fpu-target.inc: fpu-target.h $(srcdir)/libgfortran.h
 	grep '^#define GFC_FPE_' < $(top_srcdir)/../gcc/fortran/libgfortran.h > $@ || true
 	grep '^#define GFC_FPE_' < $(srcdir)/libgfortran.h >> $@ || true
+
+# KNC (k1om): the implicit linker script that libgfortran.spec names there.
+libgfortran-knc.ld: $(srcdir)/config/guard-knc.ld
+	cp $(srcdir)/config/guard-knc.ld $@
 
 # Place ISO_Fortran_binding.h under include/ in the build directory such
 # that it can be used for in-built-tree testsuite runs without interference of
