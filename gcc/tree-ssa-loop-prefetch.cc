@@ -311,6 +311,12 @@ dump_mem_ref (FILE *file, struct mem_ref *ref)
    one loop are gathered.  */
 static hash_map<tree, name_expansion *> *affine_expand_cache;
 
+/* True while the references of a loop are gathered for a target with
+   two-level prefetch distances (TARGET_PREFETCH_DISTANCES); only then does
+   find_or_create_group merge references through affine_base_difference, so
+   the grouping of every other target is unchanged.  */
+static bool affine_grouping;
+
 /* If the addresses of the memory references A and B differ by a constant,
    store it in *DIFF and return true.  The vectorizer gives each access its
    own pointer, initialized before the loop as the array plus an offset that
@@ -363,7 +369,8 @@ find_or_create_group (struct mem_ref_group **groups, tree base, tree step,
       if (operand_equal_p ((*groups)->step, step, 0)
 	  && operand_equal_p ((*groups)->base, base, 0))
 	return *groups;
-      if (operand_equal_p ((*groups)->step, step, 0)
+      if (affine_grouping
+	  && operand_equal_p ((*groups)->step, step, 0)
 	  && affine_base_difference (base, (*groups)->base, &diff))
 	{
 	  *delta += diff;
@@ -2052,7 +2059,9 @@ loop_prefetch_arrays (class loop *loop, bool &need_lc_ssa_update)
   ninsns = tree_num_loop_insns (loop, &eni_size_weights);
 
   /* Step 1: gather the memory references.  */
+  affine_grouping = two_level;
   refs = gather_memory_references (loop, &no_other_refs, &mem_ref_count);
+  affine_grouping = false;
 
   /* Give up prefetching if the number of memory references in the
      loop is not reasonable based on profitablity and compilation time
