@@ -101,8 +101,10 @@ knc_processor_costs (unsigned chains)
     0, 16,                  /* E: scatter uses gather's line-service cost.  */
     32, 512, 64,            /* ADR-0009 point 6: L1/L2 KB and line bytes;
                                both caches 8-way (no GCC cost field).  */
-    4,                      /* E: one outstanding prefetch per HW thread;
-                               no measured queue capacity yet.  */
+    1024,                   /* S8-03: software prefetch slots the loop pass
+                               may keep in flight, not a hardware queue; C5
+                               ran eight streams at 16 + 32 lines (384)
+                               with profit.  */
     3,                      /* E: retain generic branch heuristic.  */
     COSTS_N_INSNS (1),       /* CH x87_add.rt.  */
     COSTS_N_INSNS (2),       /* CH x87_mul.rt.  */
@@ -1006,6 +1008,53 @@ ix86_knc_vectorizer_params (struct gcc_options *opts,
 			    struct gcc_options *opts_set)
 {
   SET_OPTION_IF_UNSET (opts, opts_set, param_vect_partial_vector_usage, 1);
+
+  /* S8-03 (E5-07, ADR-0009 point 5): software prefetch carries streaming
+     code on KNC, whose L2 hardware prefetcher follows at most 16 streams
+     and stops at a 4 KiB page while the in-order core stalls on every
+     miss.  -march=knc turns -fprefetch-loop-arrays on at -O2 and above
+     (not -Os; a user setting wins).  The pass's instruction ratios drop to
+     one: an eight-stream row is two instructions per reference, and C2
+     prices vprefetch0 at nothing and vprefetch1 at about two core cycles.
+     The distances come from ix86_knc_prefetch_distances.  */
+  if (opts->x_flag_prefetch_loop_arrays < 0
+      && opts->x_optimize >= 2
+      && !opts->x_optimize_size)
+    opts->x_flag_prefetch_loop_arrays = 1;
+  SET_OPTION_IF_UNSET (opts, opts_set, param_min_insn_to_prefetch_ratio, 1);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_prefetch_min_insn_to_mem_ratio,
+		       1);
+}
+
+/* TARGET_PREFETCH_DISTANCES.  Distances in cache lines for the two prefetch
+   levels (knc-characterization.md C2, C5 and the S8-12 rerun, 2026-11-08):
+   vprefetch1 (L2) at knc-prefetch-l2-distance, 32 lines at the best point of
+   a stream, a stencil and an eight-stream row at 2 and 4 threads per core;
+   vprefetch0 (L1) at knc-prefetch-l1-distance, 16 lines, halved when the
+   L1 footprint (distance x prefetched streams x threads per core) exceeds a
+   quarter of L1 (128 lines), which gives the row its measured best 8 at 2
+   and 4 threads and keeps 16 at one thread.  L1 prefetch alone measured
+   1.7-2.3x slower than none, so the pass never gets a near distance without
+   a far one, and the near distance stays below the far one however the
+   params are set.  NSTREAMS is zero when the pass only asks whether to
+   defer its trip count check to the far distance.  */
+bool
+ix86_knc_prefetch_distances (unsigned nstreams, unsigned *near, unsigned *far)
+{
+  if (!TARGET_KNC)
+    return false;
+
+  unsigned l1 = knc_prefetch_l1_distance, l2 = knc_prefetch_l2_distance;
+  unsigned l1_lines = (param_l1_cache_line_size
+		       ? param_l1_cache_size * 1024 / param_l1_cache_line_size
+		       : 512);
+  if (nstreams && l1 > 1 && l1 * nstreams * knc_threads_per_core > l1_lines / 4)
+    l1 /= 2;
+  if (l1 >= l2)
+    l1 = MAX (1, l2 / 2);
+  *near = l1;
+  *far = l2;
+  return true;
 }
 
 /* KNC scalar transport admits XImode, but its packed vector ABI belongs

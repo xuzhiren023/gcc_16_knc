@@ -1940,3 +1940,31 @@
   "TARGET_KNC"
   "vpsrlvd\t{%g2, %g1, %g0|%g0, %g1, %g2}"
   [(set_attr "type" "sseishft") (set_attr "mode" "XI")])
+
+;; Software prefetch (S8-03, E5-07; Intel 327364-001 pp. 641-656).  Locality
+;; 3 to 0 selects vprefetch0 (L1), vprefetch1 (L2), vprefetch2 (L2, non-
+;; temporal) and vprefetchnta (L1, non-temporal), as the SSE pattern orders
+;; t0/t1/t2/nta.  The write hint is dropped like *prefetch_sse: vprefetche*
+;; is unmeasured (knc-characterization.md C5 used read hints for the output
+;; stream).  knc.md gives the prefetch a scalar slot: C2 measured vprefetch0
+;; pairing with a vector op for free.
+(define_insn "knc_prefetch"
+  [(prefetch (match_operand 0 "address_operand" "p")
+	     (const_int 0)
+	     (match_operand:SI 1 "const_int_operand"))]
+  "TARGET_KNC"
+{
+  static const char * const patterns[4] = {
+    "vprefetchnta\t%a0", "vprefetch2\t%a0", "vprefetch1\t%a0", "vprefetch0\t%a0"
+  };
+
+  int locality = INTVAL (operands[1]);
+  gcc_assert (IN_RANGE (locality, 0, 3));
+
+  return patterns[locality];
+}
+  [(set_attr "type" "sse")
+   (set_attr "knc_special" "prefetch")
+   (set (attr "length_address")
+	(symbol_ref "memory_address_length (operands[0], false)"))
+   (set_attr "memory" "none")])
