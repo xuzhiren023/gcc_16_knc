@@ -1310,10 +1310,14 @@ issue_prefetches (struct mem_ref_group *groups,
 
 /* Ask the target for two-level prefetch distances for the streams in GROUPS
    that will be prefetched.  On success set *AHEAD and *FAR_AHEAD, in
-   iterations, and return true.  The target answers in cache lines; a stream
-   whose step is below a line is prefetched once per PREFETCH_MOD iterations,
-   so the smallest PREFETCH_MOD in the loop (its largest step) converts lines
-   to iterations and no stream runs further ahead than asked.  */
+   iterations, and return true.  The target answers in cache lines, and the
+   loop's fastest stream converts them to iterations so that no stream runs
+   further ahead than asked: a stream whose step is below a line is
+   prefetched once per PREFETCH_MOD iterations, so the smallest PREFETCH_MOD
+   in the loop (its largest step) scales the distances up; a stream whose
+   step exceeds a line keeps the distance in bytes and prefetches
+   ceil (lines * line size / step) iterations ahead, at least one, so a loop
+   over 1092-byte columns asks for 2 iterations for 32 lines, not 32.  */
 
 static bool
 target_prefetch_distances (struct mem_ref_group *groups, unsigned *ahead,
@@ -1321,6 +1325,7 @@ target_prefetch_distances (struct mem_ref_group *groups, unsigned *ahead,
 {
   struct mem_ref *ref;
   unsigned nstreams = 0, mod = 0, near, far;
+  unsigned HOST_WIDE_INT step = 0;
 
   for (; groups; groups = groups->next)
     for (ref = groups->refs; ref; ref = ref->next)
@@ -1329,14 +1334,31 @@ target_prefetch_distances (struct mem_ref_group *groups, unsigned *ahead,
 	  nstreams++;
 	  if (mod == 0 || ref->prefetch_mod < mod)
 	    mod = ref->prefetch_mod;
+	  if (cst_and_fits_in_hwi (ref->group->step))
+	    {
+	      unsigned HOST_WIDE_INT s
+		= absu_hwi (int_cst_value (ref->group->step));
+	      if (s > step)
+		step = s;
+	    }
 	}
 
   if (nstreams == 0
       || !targetm.prefetch_distances (nstreams, &near, &far))
     return false;
 
-  *ahead = MAX (1, near * mod);
-  *far_ahead = MAX (1, far * mod);
+  if (step > (unsigned HOST_WIDE_INT) PREFETCH_BLOCK)
+    {
+      *ahead = MAX (1, CEIL ((unsigned HOST_WIDE_INT) near * PREFETCH_BLOCK,
+			     step));
+      *far_ahead = MAX (1, CEIL ((unsigned HOST_WIDE_INT) far * PREFETCH_BLOCK,
+				 step));
+    }
+  else
+    {
+      *ahead = MAX (1, near * mod);
+      *far_ahead = MAX (1, far * mod);
+    }
   if (dump_file && (dump_flags & TDF_DETAILS))
     fprintf (dump_file, "Target distances for %u streams: %u and %u lines, "
 	     "%u and %u iterations\n", nstreams, near, far, *ahead, *far_ahead);
