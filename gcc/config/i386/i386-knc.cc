@@ -1610,6 +1610,27 @@ ix86_knc_expand_sqrt (rtx *operands)
 bool
 ix86_knc_sqrt_rtx_cost (rtx x, machine_mode mode, int *total)
 {
+  /* S8-06: an FMA may only fold an aligned full-line operand (imci.md
+     *knc_fma<mode>4).  Its predicates also take a misaligned memory
+     operand, which LRA must reload with the unpack pair (CH unpack.rt,
+     two ops), so a fold of one costs that pair and combine keeps the
+     load separate, leaving the memory slot for a {1to16} broadcast.  */
+  if (GET_CODE (x) == FMA && (mode == V16SFmode || mode == V8DFmode))
+    {
+      int pairs = 0;
+      for (int i = 0; i < 3; ++i)
+	{
+	  rtx op = XEXP (x, i);
+	  if (GET_CODE (op) == NEG)
+	    op = XEXP (op, 0);
+	  pairs += MEM_P (op) && misaligned_operand (op, mode);
+	}
+      if (!pairs)
+	return false;
+      *total = (mode == V16SFmode ? ix86_cost->fmass : ix86_cost->fmasd)
+	       + pairs * COSTS_N_INSNS (2);
+      return true;
+    }
   if (GET_CODE (x) != SQRT || mode != V16SFmode)
     return false;
   *total = COSTS_N_INSNS (19);
