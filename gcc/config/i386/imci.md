@@ -655,6 +655,21 @@
   [(set_attr "type" "<knc_int_type>")
    (set_attr "mode" "XI")])
 
+;; S8-07: zmm1 += zmm2 * zmm3/m512 as modular int32 (Intel 327364-001
+;; VPMADD231D), so a * b + c is exact without any flag.  IMCI has no 132 or
+;; 213 integer form, so the addend is always the tied destination; when it
+;; stays live the allocator adds one copy, no worse than vpmulld + vpaddd.
+(define_insn "*knc_maddv16si4"
+  [(set (match_operand:V16SI 0 "register_operand" "=YJ")
+        (plus:V16SI
+          (mult:V16SI (match_operand:V16SI 1 "register_operand" "%YJ")
+                      (match_operand:V16SI 2 "vector_operand" "YJBm"))
+          (match_operand:V16SI 3 "register_operand" "0")))]
+  "TARGET_KNC"
+  "vpmadd231d\t%g2, %g1, %g0"
+  [(set_attr "type" "sseimul")
+   (set_attr "mode" "XI")])
+
 (define_mode_iterator KNC_INT [V16SI V8DI])
 (define_mode_attr knc_int_suffix [(V16SI "d") (V8DI "q")])
 (define_insn "*knc_<code><mode>3"
