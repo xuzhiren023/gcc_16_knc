@@ -834,23 +834,11 @@ ix86_knc_expand_duplicate (rtx target, rtx value)
       emit_move_insn (mem, value);
       value = mem;
     }
-  if (MEM_P (value))
-    emit_insn (gen_rtx_SET (target, gen_rtx_VEC_DUPLICATE (mode, value)));
-  else
-    {
-      rtx block = gen_reg_rtx (mode);
-      value = force_reg (inner, value);
-      if (mode == V16SFmode)
-	{
-	  emit_insn (gen_knc_broadcast_blockv16sf (block, value));
-	  emit_insn (gen_knc_broadcast_swizzlev16sf (target, block));
-	}
-      else
-	{
-	  emit_insn (gen_knc_broadcast_blockv8df (block, value));
-	  emit_insn (gen_knc_broadcast_swizzlev8df (target, block));
-	}
-    }
+  /* A register value stays a vec_duplicate until reload
+     (*knc_duplicate_reg, S8-06), so combine can fold its load.  */
+  if (!MEM_P (value))
+    value = force_reg (inner, value);
+  emit_insn (gen_rtx_SET (target, gen_rtx_VEC_DUPLICATE (mode, value)));
 }
 
 /* General construction uses scalar stores followed by one aligned load.
@@ -1622,6 +1610,27 @@ ix86_knc_expand_sqrt (rtx *operands)
 bool
 ix86_knc_sqrt_rtx_cost (rtx x, machine_mode mode, int *total)
 {
+  /* S8-06: an FMA may only fold an aligned full-line operand (imci.md
+     *knc_fma<mode>4).  Its predicates also take a misaligned memory
+     operand, which LRA must reload with the unpack pair (CH unpack.rt,
+     two ops), so a fold of one costs that pair and combine keeps the
+     load separate, leaving the memory slot for a {1to16} broadcast.  */
+  if (GET_CODE (x) == FMA && (mode == V16SFmode || mode == V8DFmode))
+    {
+      int pairs = 0;
+      for (int i = 0; i < 3; ++i)
+	{
+	  rtx op = XEXP (x, i);
+	  if (GET_CODE (op) == NEG)
+	    op = XEXP (op, 0);
+	  pairs += MEM_P (op) && misaligned_operand (op, mode);
+	}
+      if (!pairs)
+	return false;
+      *total = (mode == V16SFmode ? ix86_cost->fmass : ix86_cost->fmasd)
+	       + pairs * COSTS_N_INSNS (2);
+      return true;
+    }
   if (GET_CODE (x) != SQRT || mode != V16SFmode)
     return false;
   *total = COSTS_N_INSNS (19);
