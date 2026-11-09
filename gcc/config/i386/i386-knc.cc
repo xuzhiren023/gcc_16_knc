@@ -131,8 +131,9 @@ knc_processor_costs (unsigned chains)
     knc_stringops, knc_stringops,
     COSTS_N_INSNS (4), COSTS_N_INSNS (2), /* E: generic branch estimates,
                                           branch latency unmeasured.  */
-    "16", "16:11:8", "0:0:8", "16", /* E: generic code alignment pending
-                                       front-end measurements.  */
+    "64", "16:11:8", "0:0:8", "64", /* M: loops and functions on the 64-byte
+                                       line (S8-08 A/A pairs); jumps and
+                                       labels generic.  */
     4, 2, COSTS_N_INSNS (2) /* E: generic small unroll/mispredict heuristics;
                               only reduction unrolling measured here.  */
   };
@@ -1075,6 +1076,22 @@ ix86_knc_vectorizer_params (struct gcc_options *opts,
   SET_OPTION_IF_UNSET (opts, opts_set, param_min_insn_to_prefetch_ratio, 1);
   SET_OPTION_IF_UNSET (opts, opts_set, param_prefetch_min_insn_to_mem_ratio,
 		       1);
+
+  /* S8-08 (E5-12): -mtune=knc starts loops and functions on a 64-byte line.
+     In A/A pairs on the card (one assembly linked twice, the second copy
+     shifted half a line), m2_mat8 ran 1.34x apart at the generic 16 and
+     0.76x at 32, and every kernel stayed within 1.8% at 64.
+     ix86_default_align reads the per-processor table, not the KNC one, so
+     replace its choice here; an explicit -falign-loops= or
+     -falign-functions= still wins, and -Os or -fno-align-* stays off.  */
+  const processor_costs *knc = ix86_knc_tune_cost (opts, NULL);
+  if (knc)
+    {
+      if (opts->x_flag_align_loops && !opts_set->x_str_align_loops)
+	opts->x_str_align_loops = knc->align_loop;
+      if (opts->x_flag_align_functions && !opts_set->x_str_align_functions)
+	opts->x_str_align_functions = knc->align_func;
+    }
 }
 
 /* S8-10 (E5-16): a remote line crosses the ring, so data that other cores
