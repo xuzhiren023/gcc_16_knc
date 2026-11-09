@@ -1468,6 +1468,22 @@
   [(set_attr "type" "ssemuladd")
    (set_attr "mode" "<MODE>")])
 
+;; The same with a broadcast scalar multiplicand (S8-06, M2 mat8).
+(define_insn "*knc_fma<mode>_mask_bcst"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
+	(vec_merge:KNC_FP
+	  (fma:KNC_FP
+	    (vec_duplicate:KNC_FP
+	      (match_operand:<knc_fp_scalar> 1 "memory_operand" "m"))
+	    (match_operand:KNC_FP 2 "register_operand" "YJ")
+	    (match_operand:KNC_FP 3 "register_operand" "0"))
+	  (match_dup 3)
+	  (match_operand:<knc_maskmode> 4 "register_operand" "YL")))]
+  "TARGET_KNC && ix86_knc_element_aligned_mem_p (operands[1], <MODE>mode)"
+  "vfmadd231<knc_fp_suffix>\t{%1%{<knc_bcst>%}, %g2, %g0%{%4%}|%g0%{%4%}, %g2, %1%{<knc_bcst>%}}"
+  [(set_attr "type" "ssemuladd")
+   (set_attr "mode" "<MODE>")])
+
 ;; cond_fma: sse.md's cond_fma<mode> calls this on entry under KNC.  There
 ;; is no {z} form, so an else value other than the addend is blended into
 ;; the addend first (vblendm, the mask selecting the addend); the masked
