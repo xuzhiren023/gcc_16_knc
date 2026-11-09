@@ -48,6 +48,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "dumpfile.h"
 #include "case-cfn-macros.h"
 #include "cfgloop.h"
+#include "predict.h"
 #include "tree-vectorizer.h"
 #include "i386-builtins.h"
 
