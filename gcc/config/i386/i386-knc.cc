@@ -151,6 +151,20 @@ ix86_knc_tune_cost (const gcc_options *opts, const processor_costs *fallback)
   return opts->x_knc_threads_per_core == 4 ? &four_threads : &fewer_threads;
 }
 
+/* S8-08 (E5-12, ADR-0009 amendment 1 point 6): -mtune=knc starts from the
+   generic flags and changes only those with a documented or measured
+   reason; docs/research/knc-costs.md lists every flag.  The 0x66 and 0x67
+   prefixes cost 2 decode cycles (SSDG p.16), so promote HImode register
+   operations to SImode.  Runs before -mtune-ctrl, which still wins.  */
+void
+ix86_knc_tune_features (const gcc_options *opts)
+{
+  if (!opts->x_ix86_tune_string
+      || strcmp (opts->x_ix86_tune_string, "knc"))
+    return;
+  ix86_tune_features[X86_TUNE_FAST_PREFIX] = 0;
+}
+
 /* Costs that need KNC lowering knowledge rather than x86 mode splitting.  */
 int
 ix86_knc_stmt_cost (int kind, machine_mode mode, stmt_vec_info stmt)
