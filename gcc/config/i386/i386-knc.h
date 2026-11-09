@@ -105,4 +105,7 @@ extern void ix86_knc_expand_pack (enum rtx_code, rtx *);
 extern void ix86_knc_expand_div (rtx *, bool);
 extern int ix86_knc_division_cost (const struct processor_costs *);
 
+extern unsigned int ix86_knc_local_alignment (tree, unsigned int);
+extern void ix86_knc_align_thread_local (tree);
+
 #endif /* GCC_I386_KNC_H */

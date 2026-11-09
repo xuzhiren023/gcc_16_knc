@@ -48,6 +48,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "dumpfile.h"
 #include "case-cfn-macros.h"
 #include "cfgloop.h"
+#include "predict.h"
 #include "tree-vectorizer.h"
 #include "i386-builtins.h"
 
@@ -1012,6 +1013,54 @@ ix86_knc_vectorizer_params (struct gcc_options *opts,
   SET_OPTION_IF_UNSET (opts, opts_set, param_min_insn_to_prefetch_ratio, 1);
   SET_OPTION_IF_UNSET (opts, opts_set, param_prefetch_min_insn_to_mem_ratio,
 		       1);
+}
+
+/* S8-10 (E5-16): a remote line crosses the ring, so data that other cores
+   write must not share a 64-byte line with data this core writes.  */
+#define KNC_LINE_BITS 512
+
+/* LOCAL_ALIGNMENT for DECL.  The .omp_data_o block of an OpenMP region is
+   read by every thread of the team, and reductions are combined into it,
+   while the encountering thread's own frames (GOMP_parallel, the outlined
+   body) grow just below it.  Starting it on a line keeps those writes off
+   its line.  Not at -Os, where the frame realignment is not worth it.  */
+unsigned int
+ix86_knc_local_alignment (tree decl, unsigned int align)
+{
+  if (align < KNC_LINE_BITS
+      && VAR_P (decl)
+      && DECL_ARTIFICIAL (decl)
+      && DECL_NAME (decl)
+      && startswith (IDENTIFIER_POINTER (DECL_NAME (decl)), ".omp_data_o")
+      && cfun
+      && !optimize_function_for_size_p (cfun))
+    return KNC_LINE_BITS;
+  return align;
+}
+
+/* TARGET_ENCODE_SECTION_INFO entry.  varasm never raises a thread-local
+   variable above a word, so a per-thread array of a line or more would
+   straddle two lines.  Start each such array this unit defines (__thread
+   or OpenMP threadprivate) on a line, as -malign-data=cacheline does for
+   static data.  The raise reaches the definition before varasm emits it;
+   only definitions that bind here are raised, so no reference elsewhere
+   assumes it.  -malign-data=abi keeps the ABI alignment.  */
+void
+ix86_knc_align_thread_local (tree decl)
+{
+  if (!VAR_P (decl)
+      || !DECL_THREAD_LOCAL_P (decl)
+      || DECL_EXTERNAL (decl)
+      || DECL_USER_ALIGN (decl)
+      || DECL_ALIGN (decl) >= KNC_LINE_BITS
+      || ix86_align_data_type == ix86_align_data_type_abi
+      || !AGGREGATE_TYPE_P (TREE_TYPE (decl))
+      || !DECL_SIZE (decl)
+      || TREE_CODE (DECL_SIZE (decl)) != INTEGER_CST
+      || wi::ltu_p (wi::to_wide (DECL_SIZE (decl)), KNC_LINE_BITS)
+      || !decl_binds_to_current_def_p (decl))
+    return;
+  SET_DECL_ALIGN (decl, KNC_LINE_BITS);
 }
 
 /* TARGET_PREFETCH_DISTANCES.  Distances in cache lines for the two prefetch

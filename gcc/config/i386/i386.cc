@@ -18788,6 +18788,9 @@ ix86_local_alignment (tree exp, machine_mode mode,
       decl = NULL;
     }
 
+  if (TARGET_KNC && decl)
+    align = ix86_knc_local_alignment (decl, align);
+
   /* Don't do dynamic stack realignment for long long objects with
      -mpreferred-stack-boundary=2.  */
   if (may_lower
@@ -25417,6 +25420,8 @@ ix86_md_asm_adjust (vec<rtx> &outputs, vec<rtx> & /*inputs*/,
 static void ATTRIBUTE_UNUSED
 ix86_encode_section_info (tree decl, rtx rtl, int first)
 {
+  if (TARGET_KNC)
+    ix86_knc_align_thread_local (decl);
   default_encode_section_info (decl, rtl, first);
 
   if (ix86_in_large_data_p (decl))
