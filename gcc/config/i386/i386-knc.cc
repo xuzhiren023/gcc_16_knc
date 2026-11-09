@@ -228,16 +228,57 @@ enum knc_builtin_code
   KNC_BUILTIN_GATHER_DF = IX86_BUILTIN_MAX + 1,
   KNC_BUILTIN_GATHER_DI,
   KNC_BUILTIN_SCATTER_DF,
-  KNC_BUILTIN_SCATTER_DI
+  KNC_BUILTIN_SCATTER_DI,
+  KNC_BUILTIN_STORENT_FENCE
 };
 
 /* Keep the internal decls alive without registering front-end builtins.
    Their distinct function types identify the gather-only ABI exemption.  */
 static GTY(()) tree knc_indexed_decls[4];
 
+/* S8-13 (E5-08): the fence the loop prefetch pass calls after a loop of
+   no-read stores (FENCE_FOLLOWING_MOVNT; i386-builtins.cc points x86_mfence
+   here on KNC, which has no mfence).  Not pure and not const, so no store
+   crosses it in GIMPLE; the insn is a scheduling barrier.  */
+static GTY(()) tree knc_storent_fence;
+
+tree
+ix86_knc_storent_fence_decl (void)
+{
+  if (!knc_storent_fence)
+    {
+      tree type = build_function_type_list (void_type_node, NULL_TREE);
+      tree decl = build_fn_decl ("__builtin_knc_storent_fence", type);
+      set_decl_built_in_function (decl, BUILT_IN_MD,
+				  KNC_BUILTIN_STORENT_FENCE);
+      TREE_NOTHROW (decl) = 1;
+      knc_storent_fence = decl;
+    }
+  return knc_storent_fence;
+}
+
+/* The storent<mode> expander on KNC: a vmovnrngoap* of a whole line, or
+   false (the expander FAILs and the store stays a normal one) when the
+   address is not known to be 64-byte aligned.  OPERANDS are the memory and
+   the register.  */
+bool
+ix86_knc_expand_storent (rtx *operands)
+{
+  rtx mem = operands[0];
+  machine_mode mode = GET_MODE (mem);
+  if (!ix86_knc_packed_mode_p (mode)
+      || !MEM_P (mem)
+      || MEM_ALIGN (mem) < GET_MODE_ALIGNMENT (mode))
+    return false;
+  emit_insn (gen_knc_storent (mode, mem, force_reg (mode, operands[1])));
+  return true;
+}
+
 tree
 ix86_knc_builtin_decl (unsigned code)
 {
+  if (code == KNC_BUILTIN_STORENT_FENCE)
+    return ix86_knc_storent_fence_decl ();
   if (code < KNC_BUILTIN_GATHER_DF || code > KNC_BUILTIN_SCATTER_DI)
     return error_mark_node;
 
@@ -314,6 +355,13 @@ rtx
 ix86_knc_expand_builtin (tree exp, rtx target)
 {
   unsigned code = DECL_MD_FUNCTION_CODE (TREE_OPERAND (CALL_EXPR_FN (exp), 0));
+  if (code == KNC_BUILTIN_STORENT_FENCE)
+    {
+      rtx mem = gen_rtx_MEM (BLKmode, gen_rtx_SCRATCH (Pmode));
+      MEM_VOLATILE_P (mem) = 1;
+      emit_insn (gen_knc_storent_fence (mem));
+      return const0_rtx;
+    }
   gcc_assert (code >= KNC_BUILTIN_GATHER_DF && code <= KNC_BUILTIN_SCATTER_DI);
   bool scatter = code >= KNC_BUILTIN_SCATTER_DF;
   bool fp = code == KNC_BUILTIN_GATHER_DF || code == KNC_BUILTIN_SCATTER_DF;

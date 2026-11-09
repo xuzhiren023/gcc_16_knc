@@ -108,4 +108,7 @@ extern int ix86_knc_division_cost (const struct processor_costs *);
 extern unsigned int ix86_knc_local_alignment (tree, unsigned int);
 extern void ix86_knc_align_thread_local (tree);
 
+extern bool ix86_knc_expand_storent (rtx *);
+extern tree ix86_knc_storent_fence_decl (void);
+
 #endif /* GCC_I386_KNC_H */
