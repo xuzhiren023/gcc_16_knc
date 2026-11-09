@@ -670,6 +670,8 @@ ix86_init_mmx_sse_builtins (void)
 	       VOID_FTYPE_PCVOID, IX86_BUILTIN_CLFLUSH);
   x86_mfence = def_builtin (OPTION_MASK_ISA_SSE2, 0, "__builtin_ia32_mfence",
 			    VOID_FTYPE_VOID, IX86_BUILTIN_MFENCE);
+  if (TARGET_KNC)
+    x86_mfence = ix86_knc_storent_fence_decl ();
 
   /* SSE3.  */
   def_builtin (0, OPTION_MASK_ISA2_MWAIT, "__builtin_ia32_monitor",
