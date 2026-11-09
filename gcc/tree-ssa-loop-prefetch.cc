@@ -49,6 +49,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "diagnostic-core.h"
 #include "dbgcnt.h"
 #include "tree-affine.h"
+#include "builtins.h"
 
 /* This pass inserts prefetch instructions to optimize cache usage during
    accesses to arrays in loops.  It processes loops sequentially and:
@@ -1373,20 +1374,29 @@ target_prefetch_distances (struct mem_ref_group *groups, unsigned *ahead,
 }
 
 /* Returns true if REF is a memory write for that a nontemporal store insn
-   can be used.  */
+   can be used.  TWO_LEVEL is true for a target with two-level prefetch
+   distances (TARGET_PREFETCH_DISTANCES).  FOOTPRINT_GUARDED is true when
+   the loop has been versioned so that it runs only when its references
+   cover at least the L2 cache (version_loop_for_storent): the reuse
+   distance, estimated from a guessed trip count, is then not consulted.  */
 
 static bool
-nontemporal_store_p (struct mem_ref *ref)
+nontemporal_store_p (struct mem_ref *ref, bool two_level,
+		     bool footprint_guarded)
 {
   machine_mode mode;
   enum insn_code code;
 
   /* REF must be a write that is not reused.  We require it to be independent
      on all other memory references in the loop, as the nontemporal stores may
-     be reordered with respect to other memory references.  */
+     be reordered with respect to other memory references.  Under the guard
+     every reuse left is across an outer loop, a whole footprint away, except
+     a line another reference of the group has just brought in.  */
   if (!ref->write_p
       || !ref->independent_p
-      || ref->reuse_distance < L2_CACHE_SIZE_BYTES)
+      || (footprint_guarded
+	  ? ref->prefetch_before != PREFETCH_ALL
+	  : ref->reuse_distance < L2_CACHE_SIZE_BYTES))
     return false;
 
   /* Check that we have the storent instruction for the mode.  */
@@ -1394,17 +1404,26 @@ nontemporal_store_p (struct mem_ref *ref)
   if (mode == BLKmode)
     return false;
 
+  /* A two-level target streams whole aligned lines only: its nontemporal
+     store insn needs the mode's alignment, and a store that cannot use it
+     must not be followed by the fence either.  */
+  if (two_level
+      && get_object_alignment (ref->mem) < GET_MODE_ALIGNMENT (mode))
+    return false;
+
   code = optab_handler (storent_optab, mode);
   return code != CODE_FOR_nothing;
 }
 
 /* If REF is a nontemporal store, we mark the corresponding modify statement
-   and return true.  Otherwise, we return false.  */
+   and return true.  Otherwise, we return false.  TWO_LEVEL and
+   FOOTPRINT_GUARDED are as for nontemporal_store_p.  */
 
 static bool
-mark_nontemporal_store (struct mem_ref *ref)
+mark_nontemporal_store (struct mem_ref *ref, bool two_level,
+			bool footprint_guarded)
 {
-  if (!nontemporal_store_p (ref))
+  if (!nontemporal_store_p (ref, two_level, footprint_guarded))
     return false;
 
   if (dump_file && (dump_flags & TDF_DETAILS))
@@ -1471,10 +1490,12 @@ may_use_storent_in_loop_p (class loop *loop)
 }
 
 /* Marks nontemporal stores in LOOP.  GROUPS contains the description of memory
-   references in the loop.  Returns whether we inserted any mfence call.  */
+   references in the loop.  Returns whether we inserted any mfence call.
+   TWO_LEVEL and FOOTPRINT_GUARDED are as for nontemporal_store_p.  */
 
 static bool
-mark_nontemporal_stores (class loop *loop, struct mem_ref_group *groups)
+mark_nontemporal_stores (class loop *loop, struct mem_ref_group *groups,
+			 bool two_level, bool footprint_guarded)
 {
   struct mem_ref *ref;
   bool any = false;
@@ -1484,7 +1505,7 @@ mark_nontemporal_stores (class loop *loop, struct mem_ref_group *groups)
 
   for (; groups; groups = groups->next)
     for (ref = groups->refs; ref; ref = ref->next)
-      any |= mark_nontemporal_store (ref);
+      any |= mark_nontemporal_store (ref, two_level, footprint_guarded);
 
   if (any && FENCE_FOLLOWING_MOVNT != NULL_TREE)
     {
@@ -1931,6 +1952,68 @@ trip_count_to_ahead_ratio_too_small_p (unsigned ahead, HOST_WIDE_INT est_niter)
   return false;
 }
 
+/* What version_loop_on_niter found out about a loop's trip count against
+   a bound, or did about it.  */
+
+enum niter_guard
+{
+  NITER_GUARD_UNKNOWN,	/* No trip count from the single exit.  */
+  NITER_GUARD_CONSTANT,	/* The trip count is a compile-time constant.  */
+  NITER_GUARD_ALWAYS,	/* The loop always reaches the bound.  */
+  NITER_GUARD_NEVER,	/* The loop never reaches the bound.  */
+  NITER_GUARD_VERSIONED	/* LOOP now runs only at or above the bound.  */
+};
+
+/* Versions LOOP on its trip count when that is known only at run time, so
+   that LOOP itself runs only when the loop iterates more than MIN_NITER
+   times (NITER.NITER's count, one less than the number of times the body
+   runs) and the other copy, the loop as it was, runs otherwise.  LIKELY is
+   the probability that the guard holds.  On NITER_GUARD_VERSIONED *COPY is
+   the other copy.  The guard chooses only between two copies that compute
+   the same values, so the exit condition's may_be_zero case need not enter
+   it.  */
+
+static enum niter_guard
+version_loop_on_niter (class loop *loop, unsigned HOST_WIDE_INT min_niter,
+		       profile_probability likely, class loop **copy)
+{
+  edge exit = single_exit (loop);
+  class tree_niter_desc niter;
+  tree type, cond;
+  gimple_seq stmts = NULL;
+
+  *copy = NULL;
+  if (!exit
+      || !number_of_iterations_exit (loop, exit, &niter, false)
+      || contains_abnormal_ssa_name_p (niter.niter))
+    return NITER_GUARD_UNKNOWN;
+  if (TREE_CODE (niter.niter) == INTEGER_CST)
+    return NITER_GUARD_CONSTANT;
+
+  type = TREE_TYPE (niter.niter);
+  if (!INTEGRAL_TYPE_P (type)
+      || !TYPE_UNSIGNED (type)
+      || (tree_fits_uhwi_p (TYPE_MAX_VALUE (type))
+	  && tree_to_uhwi (TYPE_MAX_VALUE (type)) < min_niter))
+    return NITER_GUARD_NEVER;
+
+  cond = fold_build2 (GE_EXPR, boolean_type_node, unshare_expr (niter.niter),
+		      build_int_cst (type, min_niter));
+  if (integer_nonzerop (cond))
+    return NITER_GUARD_ALWAYS;
+  if (integer_zerop (cond))
+    return NITER_GUARD_NEVER;
+
+  cond = force_gimple_operand_1 (cond, &stmts, is_gimple_condexpr_for_cond,
+				 NULL_TREE);
+  if (stmts)
+    gsi_insert_seq_on_edge_immediate (loop_preheader_edge (loop), stmts);
+  *copy = loop_version (loop, cond, NULL, likely, likely.invert (),
+			likely, likely.invert (), true);
+  update_ssa (TODO_update_ssa_no_phi);
+  return NITER_GUARD_VERSIONED;
+}
+
 /* A target with two-level prefetch distances (TARGET_PREFETCH_DISTANCES)
    prefetches a loop whose trip count is known only at run time behind a
    guard: LOOP is versioned on its trip count, so that the prefetched copy,
@@ -1941,75 +2024,107 @@ trip_count_to_ahead_ratio_too_small_p (unsigned ahead, HOST_WIDE_INT est_niter)
    LOOP may be prefetched: its trip count is a compile-time constant, which
    trip_count_to_ahead_ratio_too_small_p has already checked, or it was
    versioned, and then *VERSIONED is set.  Without a trip count from the
-   loop's single exit no guard can be built and the loop is not prefetched.
-   The guard chooses only between two copies that compute the same values,
-   so the exit condition's may_be_zero case need not enter it.  */
+   loop's single exit no guard can be built and the loop is not prefetched.  */
 
 static bool
 version_loop_for_prefetch (class loop *loop, unsigned far_ahead,
 			   bool *versioned)
 {
-  edge exit = single_exit (loop);
-  class tree_niter_desc niter;
-  tree type, cond;
-  gimple_seq stmts = NULL;
-  unsigned HOST_WIDE_INT min_niter;
+  unsigned HOST_WIDE_INT min_niter
+    = (unsigned HOST_WIDE_INT) TRIP_COUNT_TO_AHEAD_RATIO * far_ahead - 1;
+  class loop *copy;
 
-  if (!exit
-      || !number_of_iterations_exit (loop, exit, &niter, false)
-      || contains_abnormal_ssa_name_p (niter.niter))
+  /* A loop that gets this far usually iterates a lot.  */
+  switch (version_loop_on_niter (loop, min_niter,
+				 profile_probability::likely (), &copy))
     {
+    case NITER_GUARD_UNKNOWN:
       if (dump_file && (dump_flags & TDF_DETAILS))
 	fprintf (dump_file, "Not prefetching -- trip count unknown and no "
 		 "guard on it\n");
       return false;
-    }
-  if (TREE_CODE (niter.niter) == INTEGER_CST)
-    return true;
-
-  /* NITER.NITER is one less than the number of times the body runs.  */
-  type = TREE_TYPE (niter.niter);
-  min_niter = (unsigned HOST_WIDE_INT) TRIP_COUNT_TO_AHEAD_RATIO * far_ahead - 1;
-  if (!INTEGRAL_TYPE_P (type)
-      || !TYPE_UNSIGNED (type)
-      || (tree_fits_uhwi_p (TYPE_MAX_VALUE (type))
-	  && tree_to_uhwi (TYPE_MAX_VALUE (type)) < min_niter))
-    {
-      if (dump_file && (dump_flags & TDF_DETAILS))
-	fprintf (dump_file, "Not prefetching -- the trip count cannot reach "
-		 HOST_WIDE_INT_PRINT_UNSIGNED " iterations\n", min_niter + 1);
-      return false;
-    }
-
-  cond = fold_build2 (GE_EXPR, boolean_type_node, unshare_expr (niter.niter),
-		      build_int_cst (type, min_niter));
-  if (integer_nonzerop (cond))
-    return true;
-  if (integer_zerop (cond))
-    {
+    case NITER_GUARD_NEVER:
       if (dump_file && (dump_flags & TDF_DETAILS))
 	fprintf (dump_file, "Not prefetching -- the loop never runs "
 		 HOST_WIDE_INT_PRINT_UNSIGNED " iterations\n", min_niter + 1);
       return false;
+    case NITER_GUARD_CONSTANT:
+    case NITER_GUARD_ALWAYS:
+      return true;
+    case NITER_GUARD_VERSIONED:
+      *versioned = true;
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Versioned loop %d: the prefetched copy runs "
+		 "when it iterates at least " HOST_WIDE_INT_PRINT_UNSIGNED
+		 " times\n", loop->num, min_niter + 1);
+      return true;
     }
+  gcc_unreachable ();
+}
 
-  cond = force_gimple_operand_1 (cond, &stmts, is_gimple_condexpr_for_cond,
-				 NULL_TREE);
-  if (stmts)
-    gsi_insert_seq_on_edge_immediate (loop_preheader_edge (loop), stmts);
-  /* A loop that gets this far usually iterates a lot.  */
-  loop_version (loop, cond, NULL,
-		profile_probability::likely (),
-		profile_probability::unlikely (),
-		profile_probability::likely (),
-		profile_probability::unlikely (), true);
-  update_ssa (TODO_update_ssa_no_phi);
-  *versioned = true;
-  if (dump_file && (dump_flags & TDF_DETAILS))
-    fprintf (dump_file, "Versioned loop %d: the prefetched copy runs when "
-	     "it iterates at least " HOST_WIDE_INT_PRINT_UNSIGNED " times\n",
-	     loop->num, min_niter + 1);
-  return true;
+static bool loop_prefetch_arrays (class loop *, bool &, bool);
+
+/* Nontemporal stores for a two-level target (TARGET_PREFETCH_DISTANCES) in
+   LOOP, whose memory references are REFS and whose far prefetch distance
+   is FAR_AHEAD iterations.  A store is nontemporal only when the loop's
+   footprint, the volume of its references times its trip count, reaches
+   the L2 cache; the pass estimates the trip count when it is not a
+   constant, so a loop over an array of run-time length never qualified.
+   When LOOP has a store that would qualify and a run-time trip count, LOOP
+   is versioned on that count: it runs, with nontemporal stores, when the
+   footprint reaches L2 (and at least TRIP_COUNT_TO_AHEAD_RATIO far
+   distances, so that it needs no second guard for its prefetches), and the
+   other copy runs otherwise and is prefetched on its own through
+   loop_prefetch_arrays, with normal stores.  Returns true when LOOP's
+   stores may be marked without consulting the estimated reuse distance,
+   and sets *VERSIONED when it versioned LOOP.  NEED_LC_SSA_UPDATE is as
+   for loop_prefetch_arrays.  */
+
+static bool
+version_loop_for_storent (class loop *loop, struct mem_ref_group *refs,
+			  unsigned far_ahead, bool *versioned,
+			  bool &need_lc_ssa_update)
+{
+  struct mem_ref_group *gr;
+  struct mem_ref *ref;
+  bool any = false;
+  unsigned volume;
+  unsigned HOST_WIDE_INT min_niter;
+  class loop *copy;
+
+  if (!may_use_storent_in_loop_p (loop))
+    return false;
+  for (gr = refs; gr && !any; gr = gr->next)
+    for (ref = gr->refs; ref && !any; ref = ref->next)
+      any = (nontemporal_store_p (ref, true, true)
+	     && !nontemporal_store_p (ref, true, false));
+  volume = volume_of_references (refs);
+  if (!any || volume == 0)
+    return false;
+
+  min_niter = MAX ((unsigned HOST_WIDE_INT) CEIL (L2_CACHE_SIZE_BYTES, volume),
+		   (unsigned HOST_WIDE_INT) TRIP_COUNT_TO_AHEAD_RATIO
+		   * far_ahead) - 1;
+  switch (version_loop_on_niter (loop, min_niter, profile_probability::even (),
+				 &copy))
+    {
+    case NITER_GUARD_UNKNOWN:
+    case NITER_GUARD_NEVER:
+    case NITER_GUARD_CONSTANT:
+      return false;
+    case NITER_GUARD_ALWAYS:
+      return true;
+    case NITER_GUARD_VERSIONED:
+      *versioned = true;
+      if (dump_file && (dump_flags & TDF_DETAILS))
+	fprintf (dump_file, "Versioned loop %d for nontemporal stores: it "
+		 "runs when it iterates at least " HOST_WIDE_INT_PRINT_UNSIGNED
+		 " times (%u bytes per iteration); the other copy is loop "
+		 "%d\n", loop->num, min_niter + 1, volume, copy->num);
+      loop_prefetch_arrays (copy, need_lc_ssa_update, false);
+      return true;
+    }
+  gcc_unreachable ();
 }
 
 /* Determine whether or not the number of memory references in the loop is
@@ -2096,15 +2211,18 @@ insn_to_prefetch_ratio_too_small_p (unsigned ninsns, unsigned prefetch_count,
 /* Issue prefetch instructions for array references in LOOP.  Returns
    true if the LOOP was unrolled or versioned and updates NEED_LC_SSA_UPDATE
    if we need to update SSA for virtual operands and LC SSA for a split
-   edge.  */
+   edge.  STORENT is false for the copy of a loop that
+   version_loop_for_storent made for a footprint below L2: it keeps normal
+   stores.  */
 
 static bool
-loop_prefetch_arrays (class loop *loop, bool &need_lc_ssa_update)
+loop_prefetch_arrays (class loop *loop, bool &need_lc_ssa_update,
+		      bool storent)
 {
   struct mem_ref_group *refs;
   unsigned ahead, ninsns, time, unroll_factor;
   unsigned far_ahead = 0, near, far;
-  bool two_level, versioned = false;
+  bool two_level, versioned = false, footprint_guarded = false;
   HOST_WIDE_INT est_niter;
   class tree_niter_desc desc;
   bool unrolled = false, no_other_refs;
@@ -2187,7 +2305,16 @@ loop_prefetch_arrays (class loop *loop, bool &need_lc_ssa_update)
 					  unroll_factor))
     goto fail;
 
-  need_lc_ssa_update |= mark_nontemporal_stores (loop, refs);
+  /* With two levels a loop whose trip count is known only at run time
+     gets its nontemporal stores behind a guard on its footprint; the guard
+     covers the prefetch guard below as well.  */
+  if (two_level && storent)
+    footprint_guarded = version_loop_for_storent (loop, refs, far_ahead,
+						  &versioned,
+						  need_lc_ssa_update);
+  if (storent)
+    need_lc_ssa_update |= mark_nontemporal_stores (loop, refs, two_level,
+						   footprint_guarded);
 
   /* Step 4: what to prefetch?  With two levels each reference keeps both
      its near and its far prefetch in flight.  */
@@ -2198,7 +2325,8 @@ loop_prefetch_arrays (class loop *loop, bool &need_lc_ssa_update)
      versioned on it once every check has passed: the prefetched copy runs
      when the loop runs at least TRIP_COUNT_TO_AHEAD_RATIO far distances, the
      other copy is the loop as it was.  */
-  if (two_level && !version_loop_for_prefetch (loop, far_ahead, &versioned))
+  if (two_level && !footprint_guarded
+      && !version_loop_for_prefetch (loop, far_ahead, &versioned))
     goto fail;
 
   /* Step 5: unroll the loop.  TODO -- peeling of first and last few
@@ -2272,7 +2400,7 @@ tree_ssa_prefetch_arrays (void)
       if (dump_file && (dump_flags & TDF_DETAILS))
 	fprintf (dump_file, "Processing loop %d:\n", loop->num);
 
-      unrolled |= loop_prefetch_arrays (loop, need_lc_ssa_update);
+      unrolled |= loop_prefetch_arrays (loop, need_lc_ssa_update, true);
 
       if (dump_file && (dump_flags & TDF_DETAILS))
 	fprintf (dump_file, "\n\n");
