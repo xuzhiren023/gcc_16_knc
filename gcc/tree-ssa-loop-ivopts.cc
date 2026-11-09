@@ -2411,9 +2411,23 @@ find_address_like_use (struct ivopts_data *data, gimple *stmt, tree *op_p,
     return false;
 
   tree mem_type = NULL_TREE;
+  unsigned near, far;
   if (gcall *call = dyn_cast <gcall *> (stmt))
-    if (gimple_call_internal_p (call))
-      mem_type = get_mem_type_for_internal_fn (call, op_p);
+    {
+      if (gimple_call_internal_p (call))
+	mem_type = get_mem_type_for_internal_fn (call, op_p);
+      /* On a target with two-level prefetch distances
+	 (TARGET_PREFETCH_DISTANCES) the pointer of __builtin_prefetch is an
+	 address operand, so a displacement from another induction variable
+	 costs nothing; as a generic use it would cost an add and let the
+	 prefetch, rather than the access it serves, anchor the loop's
+	 pointer.  Other targets keep the generic use.  */
+      else if (gimple_call_builtin_p (call, BUILT_IN_PREFETCH)
+	       && op_p == gimple_call_arg_ptr (call, 0)
+	       && targetm.prefetch_distances
+	       && targetm.prefetch_distances (0, &near, &far))
+	mem_type = char_type_node;
+    }
   if (mem_type)
     {
       iv = alloc_iv (data, iv->base, iv->step);
@@ -4678,8 +4692,10 @@ get_address_cost (struct ivopts_data *data, struct iv_use *use,
   if (use->type == USE_PTR_ADDRESS)
     {
       gcall *call = as_a<gcall *> (use->stmt);
-      gcc_assert (gimple_call_internal_p (call));
-      code = gimple_call_internal_fn (call);
+      /* A __builtin_prefetch address is valid when a plain memory
+	 reference's is.  */
+      if (gimple_call_internal_p (call))
+	code = gimple_call_internal_fn (call);
     }
 
   if (!aff_combination_const_p (aff_inv))
@@ -7550,6 +7566,9 @@ static tree
 get_alias_ptr_type_for_ptr_address (iv_use *use)
 {
   gcall *call = as_a <gcall *> (use->stmt);
+  /* __builtin_prefetch accesses nothing.  */
+  if (!gimple_call_internal_p (call))
+    return ptr_type_node;
   switch (gimple_call_internal_fn (call))
     {
     case IFN_MASK_LOAD:

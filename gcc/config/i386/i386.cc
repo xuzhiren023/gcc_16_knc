@@ -28791,6 +28791,9 @@ ix86_libgcc_floating_mode_supported_p
 #undef TARGET_LOOP_UNROLL_ADJUST
 #define TARGET_LOOP_UNROLL_ADJUST ix86_loop_unroll_adjust
 
+#undef TARGET_PREFETCH_DISTANCES
+#define TARGET_PREFETCH_DISTANCES ix86_knc_prefetch_distances
+
 /* Disabled due to PRs 70902, 71453, 71555, 71596 and 71657.  */
 #undef TARGET_SPILL_CLASS
 #define TARGET_SPILL_CLASS ix86_spill_class

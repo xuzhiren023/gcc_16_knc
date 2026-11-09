@@ -8006,6 +8006,8 @@ lists.
 
 @hook TARGET_LOOP_UNROLL_ADJUST
 
+@hook TARGET_PREFETCH_DISTANCES
+
 @defmac POWI_MAX_MULTS
 If defined, this macro is interpreted as a signed integer C expression
 that specifies the maximum number of floating point multiplications

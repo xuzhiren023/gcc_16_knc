@@ -12634,6 +12634,22 @@ is required only when the target has special constraints like maximum
 number of memory accesses.
 @end deftypefn
 
+@deftypefn {Target Hook} bool TARGET_PREFETCH_DISTANCES (unsigned @var{nstreams}, unsigned *@var{near}, unsigned *@var{far})
+This target hook supplies two software prefetch distances for the loops
+that @option{-fprefetch-loop-arrays} handles.  @var{nstreams} is the number
+of memory streams the loop will prefetch, or zero when the pass has not
+determined it yet.  On success the hook stores in @var{near} and @var{far}
+the distances in cache lines, @var{far} the larger, and returns true: every
+stream is then prefetched twice, @var{far} lines ahead with locality 2 (1
+when nontemporal) and @var{near} lines ahead with locality 3 (0 when
+nontemporal), and the trip count check uses @var{far} instead of the
+latency-derived distance.  A loop whose trip count is known only at run
+time is versioned on it: the prefetched copy runs when the loop iterates at
+least four times @var{far}, the other copy is the loop unchanged.  The
+default is @code{NULL}, which keeps a single latency-derived prefetch
+distance.
+@end deftypefn
+
 @defmac POWI_MAX_MULTS
 If defined, this macro is interpreted as a signed integer C expression
 that specifies the maximum number of floating point multiplications

@@ -17,11 +17,14 @@
 (final_presence_set "knc-v" "knc-u")
 
 ;; Explicit overrides cover instructions whose shared x86 type is too broad.
-(define_attr "knc_special" "none,permute,convert_df,reciprocal,pair,gather"
+(define_attr "knc_special" "none,permute,convert_df,reciprocal,pair,gather,prefetch"
   (const_string "none"))
 
+;; A software prefetch takes a scalar slot: C2 (S8-01) measured vprefetch0
+;; pairing with a vector op at no cost.
 (define_attr "knc_pipe" "scalar,vector,fp,serial"
-  (cond [(eq_attr "type" "mskmov,msklog") (const_string "scalar")
+  (cond [(eq_attr "knc_special" "prefetch") (const_string "scalar")
+         (eq_attr "type" "mskmov,msklog") (const_string "scalar")
          (eq_attr "unit" "sse") (const_string "vector")
          (eq_attr "unit" "i387") (const_string "fp")
          (eq_attr "type" "alu,alu1,negnot,imov,imovx,lea,incdec,ishift,ishift1,rotate,rotate1,icmp,test,ibr,setcc,icmov")
