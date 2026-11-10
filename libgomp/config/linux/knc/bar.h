@@ -55,6 +55,7 @@
 
 /* The cores the default place list holds (affinity.c).  */
 extern unsigned int gomp_knc_ncores;
+extern void gomp_knc_init_ncores (void);
 
 /* A card has at most 61 cores.  */
 #define GOMP_KNC_BAR_GROUPS	64

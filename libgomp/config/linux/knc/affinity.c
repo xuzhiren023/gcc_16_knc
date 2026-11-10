@@ -28,6 +28,7 @@
 #define _GNU_SOURCE 1
 #endif
 #include "libgomp.h"
+#include "card.h"
 
 static void gomp_linux_init_affinity (void);
 #define gomp_init_affinity gomp_linux_init_affinity
@@ -35,81 +36,27 @@ static void gomp_linux_init_affinity (void);
 #undef gomp_init_affinity
 
 /* The cores of the default place list, for the team barrier's groups
-   (bar.h); a 7120's 60 cores without the OS core until the list is built,
-   and when the places come from the environment.  */
-unsigned int gomp_knc_ncores = 60;
+   (bar.h).  gomp_knc_init_ncores counts them from the card when the list is
+   not built: without the OS core, 60 on a 7120 and 56 on a 3120.  */
+unsigned int gomp_knc_ncores = GOMP_KNC_NCORES_DEFAULT;
+static bool gomp_knc_ncores_set;
+
+void
+gomp_knc_init_ncores (void)
+{
+  if (!gomp_knc_ncores_set)
+    gomp_knc_ncores = gomp_knc_count_cores ("");
+}
 
 #ifdef HAVE_PTHREAD_AFFINITY_NP
 
-/* A KNC card numbers its logical CPUs so that the four hardware threads of
-   core C are CPUs 4C+1 to 4C+4, and CPU 0 shares the last core with the three
-   highest CPUs.  The card's OS keeps its own work on that core.  One place per
-   logical CPU in number order, the Linux default, therefore fills one core
-   four deep before it uses the next.  The KNC default is one place per core
-   of the affinity mask, without the core of CPU 0 unless the mask holds no
-   other; env.c spreads the threads over these places.
+/* One place per logical CPU in number order, the Linux default, fills one
+   core four deep before it uses the next (card.h numbers them).  The KNC
+   default is one place per core of the affinity mask, without the core of
+   CPU 0 unless the mask holds no other; env.c spreads the threads over these
+   places.
 
-   The two readers below store, for CPU 0 and each CPU of the affinity mask
-   below MAX, a number in CORE that two CPUs share when they are on one core.
-   They return false when it is missing for one of these CPUs.  */
-
-static bool
-gomp_knc_cores_from_sysfs (unsigned long *core, unsigned long max)
-{
-  char name[sizeof ("/sys/devices/system/cpu/cpu/topology/"
-		    "thread_siblings_list") + 3 * sizeof (unsigned long)];
-  unsigned long i;
-
-  for (i = 0; i < max; i++)
-    if (i == 0 || CPU_ISSET_S (i, gomp_cpuset_size, gomp_cpusetp))
-      {
-	FILE *f;
-	int found;
-
-	/* The first sibling: the kernel lists them in increasing order.  */
-	sprintf (name, "/sys/devices/system/cpu/cpu%lu/topology/"
-		 "thread_siblings_list", i);
-	f = fopen (name, "r");
-	if (f == NULL)
-	  return false;
-	found = fscanf (f, "%lu", &core[i]);
-	fclose (f);
-	if (found != 1)
-	  return false;
-      }
-  return true;
-}
-
-/* A card is one package, so the "core id" of /proc/cpuinfo names a core.  */
-
-static bool
-gomp_knc_cores_from_cpuinfo (unsigned long *core, unsigned long max)
-{
-  FILE *f = fopen ("/proc/cpuinfo", "r");
-  char *line = NULL;
-  size_t linelen = 0;
-  unsigned long i, val, cpu = max;
-
-  if (f == NULL)
-    return false;
-  for (i = 0; i < max; i++)
-    core[i] = ULONG_MAX;
-  while (getline (&line, &linelen, f) > 0)
-    if (sscanf (line, "processor : %lu", &val) == 1)
-      cpu = val;
-    else if (sscanf (line, "core id : %lu", &val) == 1 && cpu < max)
-      core[cpu] = val;
-  free (line);
-  fclose (f);
-
-  for (i = 0; i < max; i++)
-    if ((i == 0 || CPU_ISSET_S (i, gomp_cpuset_size, gomp_cpusetp))
-	&& core[i] == ULONG_MAX)
-      return false;
-  return true;
-}
-
-/* Build the KNC default place list.  omp_get_num_procs and the default
+   Build the KNC default place list.  omp_get_num_procs and the default
    number of threads then count the CPUs of these places.  Leave
    gomp_places_list NULL if the card's topology cannot be read.  */
 
@@ -127,8 +74,10 @@ gomp_knc_init_core_places (void)
   core = malloc (max * sizeof (unsigned long));
   if (core == NULL)
     return;
-  if (!gomp_knc_cores_from_sysfs (core, max)
-      && !gomp_knc_cores_from_cpuinfo (core, max))
+  if (!gomp_knc_cores_from_sysfs ("", core, max, gomp_cpusetp,
+				  gomp_cpuset_size)
+      && !gomp_knc_cores_from_cpuinfo ("", core, max, gomp_cpusetp,
+				       gomp_cpuset_size))
     {
       free (core);
       return;
@@ -170,6 +119,7 @@ gomp_knc_init_core_places (void)
   free (core);
 
   gomp_knc_ncores = gomp_places_list_len;
+  gomp_knc_ncores_set = true;
   gomp_available_cpus = cpus;
   none = gomp_get_initial_icv_item (GOMP_DEVICE_NUM_FOR_NO_SUFFIX);
   all = gomp_get_initial_icv_item (GOMP_DEVICE_NUM_FOR_ALL);

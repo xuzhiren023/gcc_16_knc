@@ -62,6 +62,15 @@
 #include "secure_getenv.h"
 #include "environ.h"
 #include "spincount.h"
+#ifdef __k1om__
+#include "card.h"
+#include <malloc.h>
+#include <sys/resource.h>
+#ifndef M_ARENA_MAX
+/* glibc's value (malloc.h), for the host test of this file.  */
+#define M_ARENA_MAX -8
+#endif
+#endif
 
 /* Default values of ICVs according to the OpenMP standard,
    except for default-device-var.  */
@@ -1771,22 +1780,54 @@ print_device_specific_icvs (int icv_code)
 
 #ifdef __k1om__
 /* KNC: glibc gives a thread that mallocs while the other arenas are busy an
-   arena of its own, a 64 MB reservation, and a thread stack reserves the
-   RLIMIT_STACK size, often 8 MB, so 240 threads under an address-space
-   limit run out of it.  libgomp names the two settings and recommends no
-   fixed arena count (ADR-0012 in GCC-KNC; docs/research/knc-libgomp.md
-   section 6).  */
+   arena of its own, a 64 MiB reservation, up to 8 per CPU, and a thread
+   stack reserves the RLIMIT_STACK size, often 8 MiB, so 240 threads under an
+   address-space limit run out of it.  Unless the environment sets
+   MALLOC_ARENA_MAX, which glibc reads itself at its first malloc and which
+   wins, libgomp caps the arenas at load, before any thread of its own
+   starts, from what the card and the process can reserve
+   (config/linux/knc/card.h; ADR-0012 in GCC-KNC).  The CPUs are those
+   libgomp runs threads on: the affinity mask, without the OS core when the
+   KNC core places are built.  */
+static struct gomp_knc_arena gomp_knc_arena;
+
+static void
+gomp_knc_init_arenas (bool stack_set)
+{
+  struct gomp_knc_mem in;
+  struct rlimit rl;
+  unsigned long cap;
+
+  gomp_knc_read_meminfo ("", &in.mem_total, &in.commit_limit);
+  in.overcommit = gomp_knc_read_overcommit ("");
+  in.rlimit_as = GOMP_KNC_NO_LIMIT;
+  if (getrlimit (RLIMIT_AS, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY)
+    in.rlimit_as = rl.rlim_cur;
+  in.cpus = gomp_available_cpus;
+  if (stack_set)
+    in.stack = stacksize;
+  else if (getrlimit (RLIMIT_STACK, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY)
+    in.stack = rl.rlim_cur;
+  else
+    in.stack = GOMP_KNC_STACK_DEFAULT;
+  cap = gomp_knc_arena_decide (getenv ("MALLOC_ARENA_MAX"), &in,
+			       &gomp_knc_arena);
+  if (cap != 0)
+    mallopt (M_ARENA_MAX, cap);
+}
+
 static void
 gomp_knc_display_malloc (FILE *f)
 {
   const char *arenas = getenv ("MALLOC_ARENA_MAX");
 
   fprintf (f, "  [host] MALLOC_ARENA_MAX = '%s'\n", arenas ? arenas : "");
-  if (arenas == NULL || stacksize == 0)
-    fputs ("  [host] KNC hint: unset MALLOC_ARENA_MAX keeps glibc's default,"
-	   " which suits the card; a value you set wins (each arena reserves"
-	   " 64 MiB of address space, so under ulimit -v pick one that fits);"
-	   " set OMP_STACKSIZE=2M or the size the program needs\n", f);
+  gomp_knc_display_arena (f, &gomp_knc_arena);
+  if (stacksize == 0)
+    fputs ("  [host] KNC hint: each thread reserves its stack, the"
+	   " RLIMIT_STACK size unless OMP_STACKSIZE is set, and the arena"
+	   " cap counts it; set OMP_STACKSIZE=2M or the size the program"
+	   " needs\n", f);
 }
 #endif
 
@@ -2458,6 +2499,11 @@ initialize_env (void)
 #endif
   if (gomp_global_icv.bind_var != omp_proc_bind_false)
     gomp_init_affinity ();
+#ifdef __k1om__
+  /* KNC: the barrier groups' core count when no core place list was built
+     (config/linux/knc/affinity.c).  */
+  gomp_knc_init_ncores ();
+#endif
 
   {
     const char *env = getenv ("OMP_AFFINITY_FORMAT");
@@ -2539,6 +2585,14 @@ initialize_env (void)
       if (err != 0)
 	gomp_error ("Stack size change failed: %s", strerror (err));
     }
+
+#ifdef __k1om__
+  gomp_knc_init_arenas ((none != NULL
+			 && gomp_get_icv_flag (none->flags, GOMP_ICV_STACKSIZE))
+			|| (all != NULL
+			    && gomp_get_icv_flag (all->flags,
+						  GOMP_ICV_STACKSIZE)));
+#endif
 
   handle_omp_display_env ();
 

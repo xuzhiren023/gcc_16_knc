@@ -26,6 +26,7 @@
 #define GOMP_SPINCOUNT_H 1
 
 #include "libgomp.h"
+#include "card.h"
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
@@ -74,14 +75,13 @@ gomp_knc_display_delay (FILE *f)
 
 /* One spin iteration on KNC is one DELAY of gomp_knc_delay cycles (futex.h),
    not one PAUSE, so the generic count of 300000 does not mean 3 msec here.
-   The default is 3 msec at the 1.1 GHz core clock in DELAY periods: 103125
-   at the default delay of 32.  There is no CPUID probe: KNC is not a hybrid
-   part.  */
+   The default is 3 msec at the card's core clock in DELAY periods (card.h):
+   103125 at 1100 MHz and the default delay of 32, 116062 on a 7120's
+   1238 MHz.  There is no CPUID probe: KNC is not a hybrid part.  */
 static inline void do_adjust_default_spincount (void)
 {
-  gomp_spin_count_var = 3300000ULL / gomp_knc_delay;
-  if (gomp_spin_count_var == 0)
-    gomp_spin_count_var = 1;
+  gomp_spin_count_var
+    = gomp_knc_default_spincount (gomp_knc_read_mhz (""), gomp_knc_delay);
 }
 
 #endif /* GOMP_SPINCOUNT_H */
