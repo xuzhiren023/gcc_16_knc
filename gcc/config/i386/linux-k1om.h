@@ -96,7 +96,7 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
   "%{fsyntax-only:S} %{c:c} %{save-temps*:temps} %{o*}) " \
   "%{mknc-card=*:%{march=*:%{!march=knc:%e-mknc-card= is only for -march=knc}}} " \
   "%{mknc-card=*:%:knc-card(%*)} %{mphinix:%{!mknc-card=*:%:knc-card(native)}} " \
-  "%<mknc-card=* %<mphinix%<mphinix-banner %<mno-phinix-banner %<mprogress %<mno-progress"
+  "%<mknc-card=* %<mphinix %<mphinix-banner %<mno-phinix-banner %<mprogress %<mno-progress"
 
 extern const char *knc_driver_spec (int, const char **);
 extern const char *knc_card_spec (int, const char **);
