@@ -161,7 +161,10 @@ ix86_knc_tune_cost (const gcc_options *opts, const processor_costs *fallback)
    generic flags and changes only those with a documented or measured
    reason; docs/research/knc-costs.md lists every flag.  The 0x66 and 0x67
    prefixes cost 2 decode cycles (SSDG p.16), so promote HImode register
-   operations to SImode.  Runs before -mtune-ctrl, which still wins.  */
+   operations to SImode.  S8-19: KNC has no decoded icache, so drop
+   pass_align_tight_loops; its unbounded .p2align before a loop entered by
+   fallthrough runs nops on every outer trip (m2_mat8 1.105x slower, lead
+   card 2026-11-10).  Runs before -mtune-ctrl, which still wins.  */
 void
 ix86_knc_tune_features (const gcc_options *opts)
 {
@@ -169,6 +172,7 @@ ix86_knc_tune_features (const gcc_options *opts)
       || strcmp (opts->x_ix86_tune_string, "knc"))
     return;
   ix86_tune_features[X86_TUNE_FAST_PREFIX] = 0;
+  ix86_tune_features[X86_TUNE_ALIGN_TIGHT_LOOPS] = 0;
 }
 
 /* Costs that need KNC lowering knowledge rather than x86 mode splitting.  */
