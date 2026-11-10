@@ -158,8 +158,9 @@ gomp_knc_bar_notify (gomp_barrier_t *bar, int count)
 
       if (waiters == 0)
 	continue;
+      __atomic_add_fetch (&grp->seq, 1, MEMMODEL_SEQ_CST);
       /* A waiter that is not counted as parked here has not read SEQ in
-	 futex_wait yet.  */
+	 futex_wait yet, and will read the new one.  */
       if (__atomic_load_n (&grp->waiters, MEMMODEL_SEQ_CST)
 	  >= GOMP_KNC_BAR_PARKED)
 	futex_wake ((int *) &grp->seq, count);
