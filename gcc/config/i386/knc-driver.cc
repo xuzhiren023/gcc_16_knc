@@ -118,12 +118,13 @@ knc_parallel_make (void)
 }
 
 /* %:knc-driver(...) in the self spec: phinix, nobanner, progress,
-   noprogress, E, S, c, temps and the -o switch with its argument.  */
+   noprogress, E, S, c and temps.  -o never reaches a self spec, so -E
+   alone counts as output to stdout and knc_driver_job checks each job
+   for -o -.  */
 const char *
 knc_driver_spec (int argc, const char **argv)
 {
   bool phinix = false, nobanner = false, progress = false, noprogress = false;
-  bool output = false, to_stdout = false;
   knc_stop_c = knc_stop_S = knc_stop_E = knc_temps = false;
   for (int i = 0; i < argc; i++)
     {
@@ -144,14 +145,8 @@ knc_driver_spec (int argc, const char **argv)
 	knc_stop_c = true;
       else if (!strcmp (arg, "temps"))
 	knc_temps = true;
-      else if (!strcmp (arg, "-o") && i + 1 < argc)
-	{
-	  output = true;
-	  to_stdout |= !strcmp (argv[++i], "-");
-	}
     }
-  to_stdout |= knc_stop_E && !output;
-  bool quiet = to_stdout || knc_parallel_make ();
+  bool quiet = knc_stop_E || knc_parallel_make ();
   knc_banner = phinix && !nobanner && !quiet;
   knc_progress = (phinix || progress) && !noprogress && !quiet;
   knc_decided = true;
@@ -256,6 +251,15 @@ knc_compiler_proper (const char *prog)
 	  || !strcmp (prog, "rust1") || !strcmp (prog, "lto1"));
 }
 
+/* PROG is TOOL itself or a target-prefixed TOOL (k1om-mpss-linux-as).  */
+static bool
+knc_tool (const char *prog, const char *tool)
+{
+  size_t len = strlen (prog), n = strlen (tool);
+  return (!strcmp (prog, tool)
+	  || (len > n && prog[len - n - 1] == '-' && !strcmp (prog + len - n, tool)));
+}
+
 static void
 knc_bar_draw (const char *const *argv)
 {
@@ -280,9 +284,9 @@ knc_bar_draw (const char *const *argv)
     what = lbasename (knc_inputs[knc_input]);
   if (knc_compiler_proper (prog))
     verb = preprocess ? "preprocessing" : "compiling";
-  else if (!strcmp (prog, "as"))
+  else if (knc_tool (prog, "as"))
     verb = "assembling";
-  else if (!strcmp (prog, "collect2") || !strcmp (prog, "ld"))
+  else if (!strcmp (prog, "collect2") || knc_tool (prog, "ld"))
     {
       verb = "linking";
       what = "a.out";
@@ -322,7 +326,11 @@ knc_driver_job (const char *const *argv, int verbose)
   if (!knc_decided || (!knc_banner && !knc_progress))
     return;
   const char *force = getenv ("GCC_KNC_FORCE_TERMINAL");
-  if (verbose || (!(force && !strcmp (force, "1")) && !isatty (2)))
+  /* The self spec does not see -o; a job writing to stdout does.  */
+  bool to_stdout = false;
+  for (int i = 1; argv[i]; i++)
+    to_stdout |= !strcmp (argv[i], "-o") && argv[i + 1] && !strcmp (argv[i + 1], "-");
+  if (verbose || to_stdout || (!(force && !strcmp (force, "1")) && !isatty (2)))
     {
       knc_banner = knc_progress = false;
       return;
