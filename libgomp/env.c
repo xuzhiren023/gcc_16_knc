@@ -1974,6 +1974,9 @@ omp_display_env (int verbose)
       fprintf (stderr, "  [host] GOMP_SPINCOUNT = '%lu'\n",
 	       (unsigned long) gomp_spin_count_var);
 #endif
+#ifdef __k1om__
+      gomp_knc_display_delay (stderr);
+#endif
     }
 
   fputs ("OPENMP DISPLAY ENVIRONMENT END\n", stderr);
@@ -2436,6 +2439,11 @@ initialize_env (void)
   else if (all != NULL && gomp_get_icv_flag (all->flags, GOMP_ICV_WAIT_POLICY))
     wait_policy = all->icvs.wait_policy;
 
+#ifdef __k1om__
+  /* KNC: the DELAY count of a spin iteration, which the default spin count
+     is measured in (config/linux/knc/spincount.h).  */
+  gomp_knc_init_delay ();
+#endif
   if (!parse_spincount ("GOMP_SPINCOUNT", &gomp_spin_count_var))
     {
       /* Using a rough estimation of 100000 spins per msec,
