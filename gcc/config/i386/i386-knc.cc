@@ -131,8 +131,8 @@ knc_processor_costs (unsigned chains)
     knc_stringops, knc_stringops,
     COSTS_N_INSNS (4), COSTS_N_INSNS (2), /* E: generic branch estimates,
                                           branch latency unmeasured.  */
-    "64", "16:11:8", "0:0:8", "64", /* M: loops and functions on the 64-byte
-                                       line (S8-08 A/A pairs); jumps and
+    "16", "16:11:8", "0:0:8", "64", /* M: functions on the 64-byte line
+                                       (S8-08 A/A pairs); loops, jumps and
                                        labels generic.  */
     4, 2, COSTS_N_INSNS (2) /* E: generic small unroll/mispredict heuristics;
                               only reduction unrolling measured here.  */
@@ -1077,21 +1077,19 @@ ix86_knc_vectorizer_params (struct gcc_options *opts,
   SET_OPTION_IF_UNSET (opts, opts_set, param_prefetch_min_insn_to_mem_ratio,
 		       1);
 
-  /* S8-08 (E5-12): -mtune=knc starts loops and functions on a 64-byte line.
+  /* S8-08 (E5-12): -mtune=knc starts functions on a 64-byte line.
      In A/A pairs on the card (one assembly linked twice, the second copy
      shifted half a line), m2_mat8 ran 1.34x apart at the generic 16 and
      0.76x at 32, and every kernel stayed within 1.8% at 64.
      ix86_default_align reads the per-processor table, not the KNC one, so
-     replace its choice here; an explicit -falign-loops= or
-     -falign-functions= still wins, and -Os or -fno-align-* stays off.  */
+     replace its choice here; an explicit -falign-functions= still wins, and
+     -Os or -fno-align-functions stays off.  Loops keep the default: 64 has
+     no max-skip, so an inner loop entered by fallthrough ran up to 63 bytes
+     of nops per outer trip (mat8 1.106x, mat16 1.173x slower on the card).  */
   const processor_costs *knc = ix86_knc_tune_cost (opts, NULL);
-  if (knc)
-    {
-      if (opts->x_flag_align_loops && !opts_set->x_str_align_loops)
-	opts->x_str_align_loops = knc->align_loop;
-      if (opts->x_flag_align_functions && !opts_set->x_str_align_functions)
-	opts->x_str_align_functions = knc->align_func;
-    }
+  if (knc && opts->x_flag_align_functions
+      && !opts_set->x_str_align_functions)
+    opts->x_str_align_functions = knc->align_func;
 }
 
 /* S8-10 (E5-16): a remote line crosses the ring, so data that other cores
