@@ -376,9 +376,20 @@ version_dep =
 endif
 
 
+# KNC (k1om): the implicit linker scripts g++ names after -lstdc++ there
+# (LIBSTDCXX_RUNTIME_GUARD in gcc/config/i386/linux-k1om.h).  They fail a link
+# whose -lstdc++ found an older library than this one.
+knc_runtime_guard = $(if $(filter k1om,$(host_cpu)),libstdc++-knc.ld libstdc++-knc-static.ld)
+install-knc-runtime-guard:
+	@for f in $(knc_runtime_guard); do \
+	  $(MKDIR_P) $(DESTDIR)$(toolexeclibdir) && \
+	  $(INSTALL_DATA) $(top_srcdir)/config/abi/post/k1om-linux-gnu/$$f \
+	    $(DESTDIR)$(toolexeclibdir)/$$f || exit 1; \
+	done
+
 # Control additional build primary rules.
 all-once: libstdc++convenience.la $(STAMP_DEBUG)
-install-data-once: $(STAMP_INSTALL_DEBUG)
+install-data-once: $(STAMP_INSTALL_DEBUG) install-knc-runtime-guard
 
 all-local: all-once
 install-data-local: install-data-once
