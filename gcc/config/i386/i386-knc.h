@@ -27,6 +27,7 @@ class vec_perm_indices;
 
 extern const struct processor_costs *ix86_knc_tune_cost
   (const struct gcc_options *, const struct processor_costs *);
+extern void ix86_knc_tune_features (const struct gcc_options *);
 extern int ix86_knc_stmt_cost (int, machine_mode, class _stmt_vec_info *);
 extern bool ix86_knc_reduction_p (class _stmt_vec_info *);
 extern bool ix86_knc_packed_mode_p (machine_mode);
