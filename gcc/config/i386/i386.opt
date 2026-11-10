@@ -1414,6 +1414,10 @@ mphinix-banner
 Target Driver Condition({defined (KNC_DRIVER_OPTIONS)})
 KNC only: print the -mphinix banner on a terminal (default on).
 
+mknc-card=
+Target Driver Joined RejectNegative Condition({defined (KNC_DRIVER_OPTIONS)})
+KNC only: tune for a card model: generic (default), 3100, 5100, 7100, a card name such as 7120P, or native.
+
 mprogress
 Target Driver Condition({defined (KNC_DRIVER_OPTIONS)})
 KNC only: draw a progress bar, one step per driver job, on a terminal (default with -mphinix).
