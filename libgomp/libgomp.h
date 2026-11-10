@@ -775,6 +775,13 @@ struct gomp_target_task
   void *hostaddrs[];
 };
 
+#ifdef __k1om__
+/* KNC: a member that starts a cache line of its own.  */
+#define GOMP_KNC_LINE __attribute__((aligned (64)))
+#else
+#define GOMP_KNC_LINE
+#endif
+
 /* This structure describes a "team" of threads.  These are the threads
    that are spawned by a PARALLEL constructs, as well as the work sharing
    constructs that the team encounters.  */
@@ -857,9 +864,23 @@ struct gomp_team
   /* Number of tasks waiting for their completion event to be fulfilled.  */
   unsigned int task_detach_count;
 
-  /* This array contains structures for implicit tasks.  */
-  struct gomp_task implicit_task[];
+  /* This array contains structures for implicit tasks.  Use
+     gomp_implicit_task to index it.  */
+  struct gomp_task implicit_task[] GOMP_KNC_LINE;
 };
+
+#ifdef __k1om__
+/* KNC: implicit task I is this many bytes after implicit_task[0], a whole
+   number of cache lines, so that no two threads write one line.  */
+#define GOMP_IMPLICIT_TASK_STRIDE \
+  ((sizeof (struct gomp_task) + 63) & ~(size_t) 63)
+#define gomp_implicit_task(TEAM, I) \
+  ((struct gomp_task *) ((char *) (TEAM)->implicit_task \
+			 + (size_t) (I) * GOMP_IMPLICIT_TASK_STRIDE))
+#else
+#define GOMP_IMPLICIT_TASK_STRIDE sizeof (struct gomp_task)
+#define gomp_implicit_task(TEAM, I) (&(TEAM)->implicit_task[I])
+#endif
 
 /* This structure contains all data that is private to libgomp and is
    allocated per thread.  */
@@ -878,11 +899,11 @@ struct gomp_thread
   struct gomp_task *task;
 
   /* This semaphore is used for ordered loops.  */
-  gomp_sem_t release;
+  gomp_sem_t release GOMP_KNC_LINE;
 
   /* Place this thread is bound to plus one, or zero if not bound
      to any place.  */
-  unsigned int place;
+  unsigned int place GOMP_KNC_LINE;
 
   /* User pthread thread pool */
   struct gomp_thread_pool *thread_pool;
@@ -908,6 +929,23 @@ struct gomp_thread
   pthread_t handle;
 #endif
 };
+
+#ifdef __k1om__
+/* KNC: a thread's TLS data and its implicit task start on a cache line and
+   fill whole lines, so no two threads write one line; RELEASE, which other
+   threads post for ordered loops, has a line of its own
+   (docs/research/knc-libgomp.md section 5 in GCC-KNC).  */
+extern char gomp_knc_thread_check1
+  [__alignof__ (struct gomp_thread) == 64
+   && sizeof (struct gomp_thread) % 64 == 0 ? 1 : -1];
+extern char gomp_knc_thread_check2
+  [offsetof (struct gomp_thread, release) % 64 == 0
+   && offsetof (struct gomp_thread, place) % 64 == 0 ? 1 : -1];
+extern char gomp_knc_task_check
+  [GOMP_IMPLICIT_TASK_STRIDE % 64 == 0
+   && GOMP_IMPLICIT_TASK_STRIDE >= sizeof (struct gomp_task)
+   && offsetof (struct gomp_team, implicit_task) % 64 == 0 ? 1 : -1];
+#endif
 
 
 struct gomp_thread_pool

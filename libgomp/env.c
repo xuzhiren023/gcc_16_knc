@@ -68,8 +68,17 @@
 const struct gomp_default_icv gomp_default_icv_values = {
   .nthreads_var = 1,
   .thread_limit_var = UINT_MAX,
+#ifdef __k1om__
+  /* KNC: def-sched-var is implementation defined.  Static, as
+     OMP_SCHEDULE=static gives: dynamic,1 at 240 threads is one atomic
+     update of the work share's line per iteration
+     (docs/research/knc-libgomp.md section 5 in GCC-KNC).  */
+  .run_sched_var = GFS_MONOTONIC | GFS_STATIC,
+  .run_sched_chunk_size = 0,
+#else
   .run_sched_var = GFS_DYNAMIC,
   .run_sched_chunk_size = 1,
+#endif
   .default_device_var = INT_MIN,
   .max_active_levels_var = 1,
   .bind_var = omp_proc_bind_false,
@@ -1760,6 +1769,27 @@ print_device_specific_icvs (int icv_code)
     }
 }
 
+#ifdef __k1om__
+/* KNC: glibc gives a thread that mallocs while the other arenas are busy an
+   arena of its own, a 64 MB reservation, and a thread stack reserves the
+   RLIMIT_STACK size, often 8 MB, so 240 threads under an address-space
+   limit run out of it.  libgomp names the two settings and recommends no
+   fixed arena count (ADR-0012 in GCC-KNC; docs/research/knc-libgomp.md
+   section 6).  */
+static void
+gomp_knc_display_malloc (FILE *f)
+{
+  const char *arenas = getenv ("MALLOC_ARENA_MAX");
+
+  fprintf (f, "  [host] MALLOC_ARENA_MAX = '%s'\n", arenas ? arenas : "");
+  if (arenas == NULL || stacksize == 0)
+    fputs ("  [host] KNC hint: unset MALLOC_ARENA_MAX keeps glibc's default,"
+	   " which suits the card; a value you set wins (each arena reserves"
+	   " 64 MiB of address space, so under ulimit -v pick one that fits);"
+	   " set OMP_STACKSIZE=2M or the size the program needs\n", f);
+}
+#endif
+
 void
 omp_display_env (int verbose)
 {
@@ -1976,6 +2006,7 @@ omp_display_env (int verbose)
 #endif
 #ifdef __k1om__
       gomp_knc_display_delay (stderr);
+      gomp_knc_display_malloc (stderr);
 #endif
     }
 

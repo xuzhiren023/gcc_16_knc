@@ -88,6 +88,11 @@ typedef struct
   struct gomp_knc_bar_group group[GOMP_KNC_BAR_GROUPS];
 } gomp_barrier_t;
 
+/* Each group is one cache line of its own.  */
+extern char gomp_knc_bar_group_check
+  [sizeof (struct gomp_knc_bar_group) == 64
+   && __builtin_offsetof (gomp_barrier_t, group) % 64 == 0 ? 1 : -1];
+
 typedef unsigned int gomp_barrier_state_t;
 
 /* The generation field contains a counter in the high bits, with a few
