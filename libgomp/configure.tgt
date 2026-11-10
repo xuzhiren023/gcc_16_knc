@@ -104,6 +104,11 @@ EOF
 	rm -f conftestx.c
 	;;
 
+    # KNC: the x86-64 futex system call, with DELAY in place of PAUSE.
+    k1om-*-linux*)
+	config_path="linux/knc linux/x86 linux posix"
+	;;
+
     # Note that sparcv7 and sparcv8 is not included here.  We need cas.
     sparcv9-*-linux* | sparc64-*-linux*)
 	echo "int i;" > conftestx.c

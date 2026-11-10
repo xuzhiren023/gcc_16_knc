@@ -407,7 +407,24 @@ if test $enable_shared = yes; then
 else
   link_gomp="-lgomp $LIBS${DL_LIBS:+ $DL_LIBS}"
 fi
+LIBGOMP_RUNTIME_GUARD_FILE=
+case "${host_cpu}" in
+  k1om)
+    # The MPSS ld (2.22) looks for the libraries a shared library needs only
+    # in its script's directories, never in -L ones, and for k1om those lack
+    # the sysroot's lib64.  A link against libgomp.so then fails on its libdl
+    # references, so name the libraries in shared links too.
+    link_gomp="-lgomp $LIBS${DL_LIBS:+ $DL_LIBS}"
+
+    # The card and its MPSS toolchain can carry an older libgomp.so.1.
+    # libgomp.spec names an implicit linker script that fails a link whose
+    # -lgomp resolved to that older runtime (config/linux/knc/guard.ld).
+    link_gomp="$link_gomp libgomp-knc.ld%s"
+    LIBGOMP_RUNTIME_GUARD_FILE=libgomp-knc.ld
+    ;;
+esac
 AC_SUBST(link_gomp)
+AC_SUBST(LIBGOMP_RUNTIME_GUARD_FILE)
 
 AM_CONDITIONAL([USE_FORTRAN], [test "$ac_cv_fc_compiler_gnu" = yes])
 

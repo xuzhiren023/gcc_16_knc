@@ -21,7 +21,7 @@ AM_CFLAGS = $(XCFLAGS)
 AM_LDFLAGS = $(XLDFLAGS) $(SECTION_LDFLAGS) $(OPT_LDFLAGS)
 
 toolexeclib_LTLIBRARIES = libgomp.la
-nodist_toolexeclib_HEADERS = libgomp.spec
+nodist_toolexeclib_HEADERS = libgomp.spec $(LIBGOMP_RUNTIME_GUARD_FILE)
 
 if LIBGOMP_BUILD_VERSIONED_SHLIB
 # -Wc is only a libtool option.
@@ -145,6 +145,10 @@ stamp-build-info: libgomp.texi
 
 CLEANFILES = $(STAMP_GENINSRC) $(STAMP_BUILD_INFO)
 MAINTAINERCLEANFILES = $(srcdir)/libgomp.info
+
+# KNC (k1om): the implicit linker script that libgomp.spec names there.
+libgomp-knc.ld: $(top_srcdir)/config/linux/knc/guard.ld
+	cp $(top_srcdir)/config/linux/knc/guard.ld $@
 
 # target overrides
 -include $(tmake_file)
