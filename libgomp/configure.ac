@@ -410,6 +410,12 @@ fi
 LIBGOMP_RUNTIME_GUARD_FILE=
 case "${host_cpu}" in
   k1om)
+    # The MPSS ld (2.22) looks for the libraries a shared library needs only
+    # in its script's directories, never in -L ones, and for k1om those lack
+    # the sysroot's lib64.  A link against libgomp.so then fails on its libdl
+    # references, so name the libraries in shared links too.
+    link_gomp="-lgomp $LIBS${DL_LIBS:+ $DL_LIBS}"
+
     # The card and its MPSS toolchain can carry an older libgomp.so.1.
     # libgomp.spec names an implicit linker script that fails a link whose
     # -lgomp resolved to that older runtime (config/linux/knc/guard.ld).
