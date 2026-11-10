@@ -24,6 +24,7 @@ class _loop_vec_info;
 class _stmt_vec_info;
 struct _slp_tree;
 class vec_perm_indices;
+class loop;
 
 extern const struct processor_costs *ix86_knc_tune_cost
   (const struct gcc_options *, const struct processor_costs *);
@@ -78,6 +79,7 @@ extern bool ix86_knc_option_override (struct gcc_options *);
 extern void ix86_knc_vectorizer_params (struct gcc_options *,
 					struct gcc_options *);
 extern bool ix86_knc_prefetch_distances (unsigned, unsigned *, unsigned *);
+extern bool ix86_knc_small_loop_unroll (unsigned *, class loop *);
 extern bool ix86_knc_check_abi_type (const_tree, machine_mode);
 extern tree ix86_knc_va_arg_error (tree);
 extern bool ix86_knc_check_abi_mode (machine_mode, bool);
