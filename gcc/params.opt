@@ -550,6 +550,10 @@ The maximum depth of a loop nest we completely peel.
 Common Joined UInteger Var(param_max_completely_peel_times) Init(16) Param Optimization
 The maximum number of peelings of a single loop that is peeled completely.
 
+-param=cunrolli-grow-size=
+Common Joined UInteger Var(param_cunrolli_grow_size) Init(1) IntegerRange(0, 1) Param Optimization
+Allow complete unrolling of inner loops before vectorization to grow code at -O3.
+
 -param=max-completely-peeled-insns=
 Common Joined UInteger Var(param_max_completely_peeled_insns) Init(200) Param Optimization
 The maximum number of insns of a completely peeled loop.
