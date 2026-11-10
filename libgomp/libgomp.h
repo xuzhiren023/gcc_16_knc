@@ -909,6 +909,26 @@ struct gomp_thread
 #endif
 };
 
+#ifdef __k1om__
+/* KNC: implicit task I is this many bytes after implicit_task[0].  */
+#define GOMP_IMPLICIT_TASK_STRIDE sizeof (struct gomp_task)
+
+/* KNC: a thread's TLS data and its implicit task start on a cache line and
+   fill whole lines, so no two threads write one line; RELEASE, which other
+   threads post for ordered loops, has a line of its own
+   (docs/research/knc-libgomp.md section 5 in GCC-KNC).  */
+extern char gomp_knc_thread_check1
+  [__alignof__ (struct gomp_thread) == 64
+   && sizeof (struct gomp_thread) % 64 == 0 ? 1 : -1];
+extern char gomp_knc_thread_check2
+  [offsetof (struct gomp_thread, release) % 64 == 0
+   && offsetof (struct gomp_thread, place) % 64 == 0 ? 1 : -1];
+extern char gomp_knc_task_check
+  [GOMP_IMPLICIT_TASK_STRIDE % 64 == 0
+   && GOMP_IMPLICIT_TASK_STRIDE >= sizeof (struct gomp_task)
+   && offsetof (struct gomp_team, implicit_task) % 64 == 0 ? 1 : -1];
+#endif
+
 
 struct gomp_thread_pool
 {
