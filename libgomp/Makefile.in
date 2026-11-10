@@ -397,6 +397,7 @@ INSTALL_STRIP_PROGRAM = @INSTALL_STRIP_PROGRAM@
 INTPTR_T_KIND = @INTPTR_T_KIND@
 LD = @LD@
 LDFLAGS = @LDFLAGS@
+LIBGOMP_RUNTIME_GUARD_FILE = @LIBGOMP_RUNTIME_GUARD_FILE@
 LIBOBJS = @LIBOBJS@
 LIBS = @LIBS@
 LIBTOOL = @LIBTOOL@
@@ -529,7 +530,7 @@ AM_CPPFLAGS = $(addprefix -I, $(search_path))
 AM_CFLAGS = $(XCFLAGS)
 AM_LDFLAGS = $(XLDFLAGS) $(SECTION_LDFLAGS) $(OPT_LDFLAGS)
 toolexeclib_LTLIBRARIES = libgomp.la $(am__append_1) $(am__append_2)
-nodist_toolexeclib_HEADERS = libgomp.spec
+nodist_toolexeclib_HEADERS = libgomp.spec $(LIBGOMP_RUNTIME_GUARD_FILE)
 
 # -Wc is only a libtool option.
 @LIBGOMP_BUILD_VERSIONED_SHLIB_TRUE@comma = ,
@@ -1432,6 +1433,10 @@ libgomp.info: $(STAMP_BUILD_INFO)
 stamp-build-info: libgomp.texi
 	$(MAKEINFO) $(AM_MAKEINFOFLAGS) $(MAKEINFOFLAGS) -I $(srcdir) -o libgomp.info $(srcdir)/libgomp.texi
 	@touch $@
+
+# KNC (k1om): the implicit linker script that libgomp.spec names there.
+libgomp-knc.ld: $(top_srcdir)/config/linux/knc/guard.ld
+	cp $(top_srcdir)/config/linux/knc/guard.ld $@
 
 # target overrides
 -include $(tmake_file)
