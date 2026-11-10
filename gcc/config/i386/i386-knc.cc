@@ -100,8 +100,13 @@ knc_processor_costs (unsigned chains)
     0, 16,                  /* E: 8 cycles/lane from gather_scattered.rt;
                                the stmt hook refines by lines touched.  */
     0, 16,                  /* E: scatter uses gather's line-service cost.  */
-    32, 512, 64,            /* ADR-0009 point 6: L1/L2 KB and line bytes;
-                               both caches 8-way (no GCC cost field).  */
+    32, 256, 64,            /* ADR-0009 point 6: L1 KB, L2 KB and line
+                               bytes; both caches 8-way (no GCC cost field).
+                               S8-14 (amendment 1 point 3): the L2 the loop
+                               passes block and prefetch for is the smaller
+                               of the 512 KB cache and the DTLB reach, 64
+                               entries of 4 KiB = 256 KB (S8-12 C4: a load
+                               beyond it costs about 29 more ticks).  */
     1024,                   /* S8-03: software prefetch slots the loop pass
                                may keep in flight, not a hardware queue; C5
                                ran eight streams at 16 + 32 lines (384)
@@ -1046,6 +1051,14 @@ ix86_knc_vectorizer_params (struct gcc_options *opts,
 {
   SET_OPTION_IF_UNSET (opts, opts_set, param_vect_partial_vector_usage, 1);
 
+  /* S8-14 (E5-13, ADR-0009 point 5): static data of a 64-byte line or
+     more starts a line (prefetch_block), so vector loops over it load
+     whole lines and take aligned masked tails.  -malign-data=abi or
+     compat still wins.  Definitions only: references keep the ABI
+     alignment.  */
+  SET_OPTION_IF_UNSET (opts, opts_set, ix86_align_data_type,
+		       ix86_align_data_type_cacheline);
+
   /* S8-03 (E5-07, ADR-0009 point 5): software prefetch carries streaming
      code on KNC, whose L2 hardware prefetcher follows at most 16 streams
      and stops at a 4 KiB page while the in-order core stalls on every
@@ -1080,6 +1093,19 @@ ix86_knc_local_alignment (tree decl, unsigned int align)
       && DECL_ARTIFICIAL (decl)
       && DECL_NAME (decl)
       && startswith (IDENTIFIER_POINTER (DECL_NAME (decl)), ".omp_data_o")
+      && cfun
+      && !optimize_function_for_size_p (cfun))
+    return KNC_LINE_BITS;
+  /* S8-14 (E5-13): a local array of a line or more starts a line, as
+     -malign-data=cacheline does for static data.  */
+  if (align < KNC_LINE_BITS
+      && VAR_P (decl)
+      && !DECL_USER_ALIGN (decl)
+      && TREE_CODE (TREE_TYPE (decl)) == ARRAY_TYPE
+      && DECL_SIZE (decl)
+      && TREE_CODE (DECL_SIZE (decl)) == INTEGER_CST
+      && !wi::ltu_p (wi::to_wide (DECL_SIZE (decl)), KNC_LINE_BITS)
+      && ix86_align_data_type == ix86_align_data_type_cacheline
       && cfun
       && !optimize_function_for_size_p (cfun))
     return KNC_LINE_BITS;
