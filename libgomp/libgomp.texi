@@ -7119,16 +7119,27 @@ arenas are busy an arena of its own, which reserves 64 MiB of address
 space, and each thread stack reserves the @code{RLIMIT_STACK} size, often
 8 MiB.  With 240 threads under an address-space limit (@code{ulimit -v})
 a program can run out of address space and fail with an out-of-memory
-error in @code{malloc} or in thread creation.  glibc's default number of
-arenas suits the card when there is no such limit; a @env{MALLOC_ARENA_MAX}
-you set always wins, and under a limit it should be a value whose
-reservations fit in it.  Fewer arenas means more threads waiting on each
-arena's lock, so no single small value suits every program or card model.
-Set @env{OMP_STACKSIZE} to the stack size the program needs, for example
-@code{2M}.
+error in @code{malloc} or in thread creation.  Unless the environment sets
+@env{MALLOC_ARENA_MAX}, libgomp therefore caps the number of arenas when
+it loads (@code{mallopt (M_ARENA_MAX, @var{n})}): one per CPU it runs
+threads on, unless their reservations and the thread stacks do not fit in
+the budget, then the largest number that fits, but at least 8.  The budget
+is the @code{RLIMIT_AS} soft limit when it is finite and @code{CommitLimit}
+of @file{/proc/meminfo} when @file{/proc/sys/vm/overcommit_memory} is 2,
+otherwise half of @code{MemTotal}; the stacks count at the
+@env{OMP_STACKSIZE} size, else the @code{RLIMIT_STACK} size.  So the cap
+follows the card's memory and the job's limits, not one model.  A
+@env{MALLOC_ARENA_MAX} you set always wins.  Set @env{OMP_STACKSIZE} to the
+stack size the program needs, for example @code{2M}.
+@item The core count of the team barrier's groups and the default spin
+count follow the card: the cores come from the topology in @file{/sys} or
+@file{/proc/cpuinfo} without the core of CPU 0, and the spin count is
+3 msec at the @code{cpu MHz} of @file{/proc/cpuinfo} (1100 MHz when it
+cannot be read).
 @item @code{omp_display_env} in verbose mode
-(@code{OMP_DISPLAY_ENV=verbose}) shows @env{MALLOC_ARENA_MAX} and, while
-it or the stack size is unset, a hint naming both settings.
+(@code{OMP_DISPLAY_ENV=verbose}) shows @env{MALLOC_ARENA_MAX}, the arena
+cap and where it came from (the user, or derived with its budget) and,
+while the stack size is unset, a hint for @env{OMP_STACKSIZE}.
 @end itemize
 
 
