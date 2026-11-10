@@ -48,6 +48,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "dumpfile.h"
 #include "case-cfn-macros.h"
 #include "cfgloop.h"
+#include "rtl-iter.h"
 #include "predict.h"
 #include "tree-vectorizer.h"
 #include "i386-builtins.h"
@@ -1218,6 +1219,42 @@ ix86_knc_prefetch_distances (unsigned nstreams, unsigned *near, unsigned *far)
   *near = l1;
   *far = l2;
   return true;
+}
+
+/* S8-15 (E5-09, ADR-0009 point 6): the -O2 small-loop unroll
+   (-munroll-only-small-loops) unrolls a vector loop of at most
+   KNC_SMALL_VECTOR_LOOP_INSNS insns up to 4 times.  S8-01 C9: a dependent
+   vector add costs about 2 ticks per vector op plus 2 per loop branch, so
+   unroll 4 beat 2 and 1 at 1 and 2 threads per core (25% then 17% over
+   none).  16 admits two loads, an op, a store and their prefetches
+   (S8-03) and keeps loops of more vector work at one copy.  Scalar loops
+   keep the generic rule.  Return false to leave NUNROLL to the caller.  */
+#define KNC_SMALL_VECTOR_LOOP_INSNS 16
+
+bool
+ix86_knc_small_loop_unroll (unsigned *nunroll, class loop *loop)
+{
+  if (!TARGET_KNC || loop->ninsns > KNC_SMALL_VECTOR_LOOP_INSNS)
+    return false;
+  bool vector = false;
+  basic_block *bbs = get_loop_body (loop);
+  subrtx_iterator::array_type array;
+  for (unsigned i = 0; i < loop->num_nodes && !vector; i++)
+    {
+      rtx_insn *insn;
+      FOR_BB_INSNS (bbs[i], insn)
+	if (NONDEBUG_INSN_P (insn))
+	  FOR_EACH_SUBRTX (iter, array, PATTERN (insn), NONCONST)
+	    if (ix86_knc_packed_mode_p (GET_MODE (*iter)))
+	      {
+		vector = true;
+		break;
+	      }
+    }
+  free (bbs);
+  if (vector)
+    *nunroll = MIN (*nunroll, 4);
+  return vector;
 }
 
 /* KNC scalar transport admits XImode, but its packed vector ABI belongs
