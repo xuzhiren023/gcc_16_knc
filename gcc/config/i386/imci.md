@@ -1026,6 +1026,45 @@
    (set_attr "memory" "store")
    (set_attr "mode" "XI")])
 
+;; S8-13 (E5-08, ADR-0009 point 5 and amendment 1 point 1): the no-read,
+;; non-globally-ordered store for a write-only stream beyond L2 (Intel
+;; 327364-001, VMOVNRNGOAPS/PD, p.355-358; knc-characterization.md C1:
+;; 3.1x over vmovaps at one thread, 2.7x on the whole card).  The line is
+;; written without a read for ownership and may pass other stores, so the
+;; loop prefetch pass, the only path that emits it, follows the loop with
+;; knc_storent_fence.  Integer lines take the ps/pd forms: the bits are the
+;; line.  Bm: only a 64-byte-aligned whole line.
+(define_c_enum "unspec" [UNSPEC_KNC_MOVNT UNSPEC_KNC_STORENT_FENCE])
+(define_mode_attr knc_ngo_suffix
+  [(V16SF "ps") (V8DF "pd") (V16SI "ps") (V8DI "pd")])
+
+(define_insn "@knc_storent<mode>"
+  [(set (match_operand:KNC_PACKED 0 "vector_memory_operand" "=Bm")
+	(unspec:KNC_PACKED
+	  [(match_operand:KNC_PACKED 1 "register_operand" "YJ")]
+	  UNSPEC_KNC_MOVNT))]
+  "TARGET_KNC"
+  "vmovnrngoa<knc_ngo_suffix>\t{%g1, %0|%0, %g1}"
+  [(set_attr "type" "ssemov")
+   (set_attr "memory" "store")
+   (set_attr "mode" "XI")])
+
+;; The fence after a loop of NGO stores: KNC has no sfence or mfence, and a
+;; locked read-modify-write of the stack top drains the store path (C1's
+;; measured form).  A full barrier to the scheduler, as mfence_nosse.
+(define_insn "knc_storent_fence"
+  [(set (match_operand:BLK 0)
+	(unspec:BLK [(match_dup 0)] UNSPEC_KNC_STORENT_FENCE))
+   (clobber (reg:CC FLAGS_REG))]
+  "TARGET_KNC"
+{
+  rtx mem = gen_rtx_MEM (SImode, stack_pointer_rtx);
+
+  output_asm_insn ("lock{%;} addl\t{$0, %0|%0, 0}", &mem);
+  return "";
+}
+  [(set_attr "memory" "unknown")])
+
 ;; Merge-only masking (no {z}): operand 2 is the else value, tied.
 (define_insn "knc_maskload_aligned<mode>"
   [(set (match_operand:KNC_PACKED 0 "register_operand" "=YJ")

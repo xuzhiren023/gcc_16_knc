@@ -2075,16 +2075,25 @@
 (define_mode_iterator STORENT_MODE
   [(DI "TARGET_SSE2 && TARGET_64BIT") (SI "TARGET_SSE2")
    (SF "TARGET_SSE4A") (DF "TARGET_SSE4A")
-   (V8DI "TARGET_AVX512F") (V4DI "TARGET_AVX") (V2DI "TARGET_SSE2")
-   (V16SF "TARGET_AVX512F") (V8SF "TARGET_AVX") V4SF
-   (V8DF "TARGET_AVX512F") (V4DF "TARGET_AVX") (V2DF "TARGET_SSE2")])
+   (V8DI "TARGET_AVX512F || TARGET_KNC") (V4DI "TARGET_AVX") (V2DI "TARGET_SSE2")
+   (V16SF "TARGET_AVX512F || TARGET_KNC") (V8SF "TARGET_AVX") V4SF
+   (V8DF "TARGET_AVX512F || TARGET_KNC") (V4DF "TARGET_AVX") (V2DF "TARGET_SSE2")
+   (V16SI "TARGET_KNC")])
 
 (define_expand "storent<mode>"
   [(set (match_operand:STORENT_MODE 0 "memory_operand")
 	(unspec:STORENT_MODE
 	  [(match_operand:STORENT_MODE 1 "register_operand")]
 	  UNSPEC_MOVNT))]
-  "TARGET_SSE")
+  "TARGET_SSE || TARGET_KNC"
+{
+  if (TARGET_KNC)
+    {
+      if (!ix86_knc_expand_storent (operands))
+	FAIL;
+      DONE;
+    }
+})
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
