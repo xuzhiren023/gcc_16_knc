@@ -2138,6 +2138,8 @@ x86_64-*-linux* | x86_64-*-kfreebsd*-gnu | x86_64-*-gnu* | k1om-*-linux*)
 	case ${target} in
 	k1om-*-linux*)
 		tm_file="${tm_file} i386/linux-k1om.h"
+		tmake_file="${tmake_file} i386/t-knc"
+		extra_gcc_objs="${extra_gcc_objs} knc-driver.o"
 		;;
 	esac
 	tmake_file="${tmake_file} i386/t-linux64"

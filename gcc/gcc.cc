@@ -3411,6 +3411,10 @@ execute (void)
 #endif /* DEBUG */
     }
 
+#ifdef DRIVER_EXECUTE_HOOK
+  DRIVER_EXECUTE_HOOK (commands[0].argv);
+#endif
+
 #ifdef ENABLE_VALGRIND_CHECKING
   /* Run the each command through valgrind.  To simplify prepending the
      path to valgrind and the option "-q" (for quiet operation unless
@@ -9070,6 +9074,10 @@ void
 driver::do_spec_on_infiles () const
 {
   size_t i;
+
+#ifdef DRIVER_INFILES_HOOK
+  DRIVER_INFILES_HOOK (infiles, n_infiles);
+#endif
 
   for (i = 0; (int) i < n_infiles; i++)
     {
