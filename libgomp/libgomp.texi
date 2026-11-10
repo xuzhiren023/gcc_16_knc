@@ -7119,11 +7119,13 @@ arenas are busy an arena of its own, which reserves 64 MiB of address
 space, and each thread stack reserves the @code{RLIMIT_STACK} size, often
 8 MiB.  With 240 threads under an address-space limit (@code{ulimit -v})
 a program can run out of address space and fail with an out-of-memory
-error in @code{malloc} or in thread creation.  Set @env{MALLOC_ARENA_MAX}
-to 60, one arena per core, and @env{OMP_STACKSIZE} to the stack size the
-program needs, for example @code{2M}.  @code{MALLOC_ARENA_MAX=1} also
-avoids the reservations, but makes every thread's @code{malloc} wait on
-one lock.  libgomp does not change these settings itself.
+error in @code{malloc} or in thread creation.  glibc's default number of
+arenas suits the card when there is no such limit; a @env{MALLOC_ARENA_MAX}
+you set always wins, and under a limit it should be a value whose
+reservations fit in it.  Fewer arenas means more threads waiting on each
+arena's lock, so no single small value suits every program or card model.
+Set @env{OMP_STACKSIZE} to the stack size the program needs, for example
+@code{2M}.
 @item @code{omp_display_env} in verbose mode
 (@code{OMP_DISPLAY_ENV=verbose}) shows @env{MALLOC_ARENA_MAX} and, while
 it or the stack size is unset, a hint naming both settings.

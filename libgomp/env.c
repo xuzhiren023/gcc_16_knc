@@ -1773,9 +1773,9 @@ print_device_specific_icvs (int icv_code)
 /* KNC: glibc gives a thread that mallocs while the other arenas are busy an
    arena of its own, a 64 MB reservation, and a thread stack reserves the
    RLIMIT_STACK size, often 8 MB, so 240 threads under an address-space
-   limit run out of it.  libgomp does not change the program's allocator; it
-   names the two settings (docs/research/knc-libgomp.md section 6 in
-   GCC-KNC).  */
+   limit run out of it.  libgomp names the two settings and recommends no
+   fixed arena count (ADR-0012 in GCC-KNC; docs/research/knc-libgomp.md
+   section 6).  */
 static void
 gomp_knc_display_malloc (FILE *f)
 {
@@ -1783,10 +1783,10 @@ gomp_knc_display_malloc (FILE *f)
 
   fprintf (f, "  [host] MALLOC_ARENA_MAX = '%s'\n", arenas ? arenas : "");
   if (arenas == NULL || stacksize == 0)
-    fputs ("  [host] KNC hint: with more than 60 threads under an address-space"
-	   " limit (ulimit -v), set MALLOC_ARENA_MAX=60 (one malloc arena per"
-	   " core; 1 makes every thread's malloc wait on one lock) and"
-	   " OMP_STACKSIZE=2M or the size the program needs\n", f);
+    fputs ("  [host] KNC hint: unset MALLOC_ARENA_MAX keeps glibc's default,"
+	   " which suits the card; a value you set wins (each arena reserves"
+	   " 64 MiB of address space, so under ulimit -v pick one that fits);"
+	   " set OMP_STACKSIZE=2M or the size the program needs\n", f);
 }
 #endif
 
