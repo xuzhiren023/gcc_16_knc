@@ -32,6 +32,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "system.h"
 #include "coretypes.h"
 #include "tm.h"
+#include "diagnostic-core.h"
 #if defined (__has_include) && __has_include (<sys/ioctl.h>)
 #include <sys/ioctl.h>
 #endif
@@ -349,4 +350,175 @@ knc_driver_job (const char *const *argv, int verbose)
     knc_bar_start ();
   if (knc_bar_on)
     knc_bar_draw (argv);
+}
+
+/* S9-13: -mknc-card=MODEL.  Every KNC card has the same core, so a model
+   changes only what follows the memory system.  The L2 prefetch distance
+   covers memory latency x bandwidth per core, about equal latency and 4.2,
+   5.3 and 5.8 GB/s per core on the 3100, 5100 and 7100: 32 lines measured
+   on a 7120P (S8-03), scaled for the others (derived, not measured).  The
+   L1 distance covers an L2 hit in core cycles, the same on every model; it
+   is written out so -### shows the whole setting.  generic takes the
+   longest distance: one too short stalls on every line, one too long only
+   holds a few more lines in L2.  docs/gcc-knc-flags.md has the table.  */
+
+struct knc_card_model
+{
+  const char *name;
+  int l2, l1;
+};
+
+static const knc_card_model knc_card_models[] = {
+  { "generic", 32, 16 }, { "3100", 23, 16 }, { "5100", 29, 16 },
+  { "7100", 32, 16 }
+};
+
+enum { KNC_CARD_GENERIC, KNC_CARD_3100, KNC_CARD_5100, KNC_CARD_7100 };
+
+/* The model of a family or card name (3100, 3120P, 7120, ...: the family
+   or card number and at most one of P, A, X, D), or -1.  */
+static int
+knc_card_lookup (const char *name)
+{
+  static const char *const numbers[] = {
+    "3100", "3110", "3115", "3120", "5100", "5110", "5120", "7100", "7110",
+    "7120"
+  };
+  if (!strcmp (name, "generic"))
+    return KNC_CARD_GENERIC;
+  for (const char *number : numbers)
+    if (!strncmp (name, number, 4)
+	&& (name[4] == '\0'
+	    || (strchr ("PAXDpaxd", name[4]) && name[5] == '\0')))
+      return (name[0] == '3' ? KNC_CARD_3100
+	      : name[0] == '5' ? KNC_CARD_5100 : KNC_CARD_7100);
+  return -1;
+}
+
+/* Open ROOT/PATH; ROOT is GCC_KNC_CARD_ROOT (a test tree) or empty.  */
+static FILE *
+knc_card_open (const char *root, const char *path)
+{
+  char *name = concat (root, path, NULL);
+  FILE *f = fopen (name, "r");
+  free (name);
+  return f;
+}
+
+/* Running on a card (the native compiler): the distinct core ids in
+   /proc/cpuinfo count every core, the one MPSS keeps for the OS included,
+   and a MemTotal over 12 GiB means a 7100, the only 16 GB model, even if a
+   kernel hides the OS core.  -1 if this is not a KNC (cpu family 11);
+   -2 for a KNC whose core count names no model.  */
+static int
+knc_card_on_card (const char *root, int *cores_out)
+{
+  FILE *f = knc_card_open (root, "/proc/cpuinfo");
+  if (!f)
+    return -1;
+  char line[512];
+  bool knc = false, seen[256] = { false };
+  int cores = 0, value;
+  while (fgets (line, sizeof line, f))
+    if (sscanf (line, "cpu family : %d", &value) == 1)
+      knc |= value == 11;
+    else if (sscanf (line, "core id : %d", &value) == 1
+	     && value >= 0 && value < 256 && !seen[value])
+      seen[value] = true, cores++;
+  fclose (f);
+  if (!knc)
+    return -1;
+  unsigned long mem_kb = 0;
+  if ((f = knc_card_open (root, "/proc/meminfo")))
+    {
+      while (fgets (line, sizeof line, f))
+	if (sscanf (line, "MemTotal: %lu", &mem_kb) == 1)
+	  break;
+      fclose (f);
+    }
+  *cores_out = cores;
+  if (cores >= 61 || mem_kb > 12UL * 1024 * 1024)
+    return KNC_CARD_7100;
+  if (cores == 59 || cores == 60)
+    return KNC_CARD_5100;
+  if (cores == 56 || cores == 57)
+    return KNC_CARD_3100;
+  return -2;
+}
+
+/* A Linux host with MPSS 3.x: /sys/class/mic/micN/family is "x100" for a
+   KNC and micN/sku its SKU name, such as "C0-7120 P/A/X/D" or
+   "B1PRQ-5110P/5120D" (mpss-modules host/linsysfs.c show_family and
+   show_sku): the first digit after the dash is the family.  The model
+   of every card found, or -1 if none; fatal if they differ.  */
+static int
+knc_card_on_host (const char *root)
+{
+  int model = -1;
+  bool mixed = false;
+  char found[512] = "";
+  for (int n = 0; n < 64; n++)
+    {
+      char path[64], line[128];
+      snprintf (path, sizeof path, "/sys/class/mic/mic%d/family", n);
+      FILE *f = knc_card_open (root, path);
+      if (!f)
+	continue;
+      bool knc = fgets (line, sizeof line, f) && !strncmp (line, "x100", 4);
+      fclose (f);
+      snprintf (path, sizeof path, "/sys/class/mic/mic%d/sku", n);
+      if (!knc || !(f = knc_card_open (root, path)))
+	continue;
+      const char *dash = fgets (line, sizeof line, f) ? strchr (line, '-') : NULL;
+      fclose (f);
+      int this_model = (!dash ? -1 : dash[1] == '3' ? KNC_CARD_3100
+			: dash[1] == '5' ? KNC_CARD_5100
+			: dash[1] == '7' ? KNC_CARD_7100 : -1);
+      if (this_model < 0)
+	continue;
+      mixed |= model >= 0 && model != this_model;
+      model = this_model;
+      size_t len = strlen (found);
+      snprintf (found + len, sizeof found - len, "%smic%d %s", len ? ", " : "",
+		n, knc_card_models[this_model].name);
+    }
+  if (mixed)
+    fatal_error (UNKNOWN_LOCATION,
+		 "%<-mknc-card=native%> found different card models (%s); "
+		 "use %<-mknc-card=MODEL%> to pick one", found);
+  return model;
+}
+
+/* %:knc-card(VALUE) in the self spec: the model's --params, each only
+   where the user did not set that param.  */
+const char *
+knc_card_spec (int argc, const char **argv)
+{
+  if (argc != 1)
+    return "";
+  int model = knc_card_lookup (argv[0]);
+  if (!strcmp (argv[0], "native"))
+    {
+      const char *root = getenv ("GCC_KNC_CARD_ROOT");
+      root = root ? root : "";
+      int cores = 0;
+      model = knc_card_on_card (root, &cores);
+      if (model == -2)
+	inform (UNKNOWN_LOCATION, "%<-mknc-card=native%>: a KNC with %d "
+		"cores is no known model; using %<-mknc-card=generic%>", cores);
+      else if (model == -1 && (model = knc_card_on_host (root)) < 0)
+	inform (UNKNOWN_LOCATION, "%<-mknc-card=native%>: no KNC card found; "
+		"using %<-mknc-card=generic%>");
+      if (model < 0)
+	model = KNC_CARD_GENERIC;
+    }
+  else if (model < 0)
+    fatal_error (UNKNOWN_LOCATION, "unknown %<-mknc-card=%> value %qs; use "
+		 "generic, 3100, 5100, 7100, native or a card name such as "
+		 "7120P", argv[0]);
+  const knc_card_model &m = knc_card_models[model];
+  return xasprintf ("%%{!-param=knc-prefetch-l2-distance=*:"
+		    "--param=knc-prefetch-l2-distance=%d} "
+		    "%%{!-param=knc-prefetch-l1-distance=*:"
+		    "--param=knc-prefetch-l1-distance=%d}", m.l2, m.l1);
 }

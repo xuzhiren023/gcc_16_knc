@@ -77,7 +77,10 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
    out (docs/gcc-knc-flags.md), expanded here so -### shows it and cc1 never
    sees the driver-only switches.  Each part yields to the user's own
    setting of that option; no fast-math part (ADR-0003, ADR-0009 point 7).
-   knc-driver.cc draws the banner and the progress bar on a terminal.  */
+   knc-driver.cc draws the banner and the progress bar on a terminal.
+   S9-13: -mknc-card=MODEL sets the card model's prefetch distances, each
+   yielding to an explicit --param; knc_card_spec resolves native and card
+   names.  -mphinix without -mknc-card= detects the card.  */
 #define KNC_DRIVER_OPTIONS 1
 
 #undef SUBTARGET_DRIVER_SELF_SPECS
@@ -91,9 +94,12 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
   "%:knc-driver(%{mphinix:phinix} %{mno-phinix-banner:nobanner} " \
   "%{mprogress:progress} %{mno-progress:noprogress} %{E:E} %{S:S} " \
   "%{fsyntax-only:S} %{c:c} %{save-temps*:temps} %{o*}) " \
-  "%<mphinix %<mphinix-banner %<mno-phinix-banner %<mprogress %<mno-progress"
+  "%{mknc-card=*:%{march=*:%{!march=knc:%e-mknc-card= is only for -march=knc}}} " \
+  "%{mknc-card=*:%:knc-card(%*)} %{mphinix:%{!mknc-card=*:%:knc-card(native)}} " \
+  "%<mknc-card=* %<mphinix%<mphinix-banner %<mno-phinix-banner %<mprogress %<mno-progress"
 
 extern const char *knc_driver_spec (int, const char **);
+extern const char *knc_card_spec (int, const char **);
 extern void knc_driver_infile (const char *, int);
 extern void knc_driver_job (const char *const *, int);
 
@@ -101,9 +107,12 @@ extern void knc_driver_job (const char *const *, int);
 #ifdef HAVE_LOCAL_CPU_DETECT
 #define EXTRA_SPEC_FUNCTIONS \
   { "local_cpu_detect", host_detect_local_cpu }, \
-  { "knc-driver", knc_driver_spec },
+  { "knc-driver", knc_driver_spec }, \
+  { "knc-card", knc_card_spec },
 #else
-#define EXTRA_SPEC_FUNCTIONS { "knc-driver", knc_driver_spec },
+#define EXTRA_SPEC_FUNCTIONS \
+  { "knc-driver", knc_driver_spec }, \
+  { "knc-card", knc_card_spec },
 #endif
 
 /* gcc.cc: before the first job, and before each job.  */
