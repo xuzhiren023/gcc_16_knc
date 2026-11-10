@@ -2416,6 +2416,12 @@ initialize_env (void)
 	gomp_global_icv.bind_var = true;
       ignore = true;
     }
+#ifdef __k1om__
+  /* KNC: with none of OMP_PROC_BIND, OMP_PLACES and GOMP_CPU_AFFINITY, spread
+     the threads over the core places of config/linux/knc/affinity.c.  */
+  if (!ignore && gomp_global_icv.bind_var == omp_proc_bind_false)
+    gomp_global_icv.bind_var = omp_proc_bind_spread;
+#endif
   if (gomp_global_icv.bind_var != omp_proc_bind_false)
     gomp_init_affinity ();
 
