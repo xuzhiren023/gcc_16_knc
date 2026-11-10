@@ -1090,6 +1090,25 @@ ix86_knc_vectorizer_params (struct gcc_options *opts,
   SET_OPTION_IF_UNSET (opts, opts_set, param_prefetch_min_insn_to_mem_ratio,
 		       1);
 
+  /* S8-09 (E5-18): the generic -O2 cost model (very-cheap) keeps every
+     loop that needs a runtime alias check or an epilogue scalar, which on
+     KNC is x87 code.  -march=knc -O2 uses the cheap model, as -O2
+     -ftree-vectorize already does: alias versioning and masked epilogues,
+     but no alignment peeling or versioning (those are dynamic, -O3).  Over
+     the S0-07 C corpus at -O2 this vectorizes 64 loops instead of 17; the
+     39 more that dynamic takes are all 8- to 32-bit integer loops in zlib,
+     bzip2 and SQLite, reached only through alignment versioning.  A runtime
+     stride (Fortran assumed-shape arrays, a[i * s]) gets a stride-1
+     version, as at -O3.  Predictive commoning stays at -O3: it adds x87
+     stack traffic to scalar recurrences.  Not at -Os; a user setting wins.  */
+  if (opts->x_optimize >= 2 && !opts->x_optimize_size)
+    {
+      if (!opts_set->x_flag_vect_cost_model
+	  && opts->x_flag_vect_cost_model == VECT_COST_MODEL_VERY_CHEAP)
+	opts->x_flag_vect_cost_model = VECT_COST_MODEL_CHEAP;
+      SET_OPTION_IF_UNSET (opts, opts_set, flag_version_loops_for_strides, 1);
+    }
+
   /* S8-08 (E5-12): -mtune=knc starts functions on a 64-byte line.
      In A/A pairs on the card (one assembly linked twice, the second copy
      shifted half a line), m2_mat8 ran 1.34x apart at the generic 16 and
