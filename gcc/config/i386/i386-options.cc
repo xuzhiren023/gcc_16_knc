@@ -1841,6 +1841,8 @@ set_ix86_tune_features (struct gcc_options *opts,
 	ix86_tune_features[i]
 	  = !!(initial_ix86_tune_features[i] & ix86_tune_mask);
     }
+  if (!ix86_tune_no_default)
+    ix86_knc_tune_features (opts);
 
   if (dump)
     {

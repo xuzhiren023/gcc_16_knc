@@ -136,8 +136,9 @@ knc_processor_costs (unsigned chains)
     knc_stringops, knc_stringops,
     COSTS_N_INSNS (4), COSTS_N_INSNS (2), /* E: generic branch estimates,
                                           branch latency unmeasured.  */
-    "16", "16:11:8", "0:0:8", "16", /* E: generic code alignment pending
-                                       front-end measurements.  */
+    "16", "16:11:8", "0:0:8", "64", /* M: functions on the 64-byte line
+                                       (S8-08 A/A pairs); loops, jumps and
+                                       labels generic.  */
     4, 2, COSTS_N_INSNS (2) /* E: generic small unroll/mispredict heuristics;
                               only reduction unrolling measured here.  */
   };
@@ -154,6 +155,20 @@ ix86_knc_tune_cost (const gcc_options *opts, const processor_costs *fallback)
   static const processor_costs four_threads = knc_processor_costs (1);
   static const processor_costs fewer_threads = knc_processor_costs (2);
   return opts->x_knc_threads_per_core == 4 ? &four_threads : &fewer_threads;
+}
+
+/* S8-08 (E5-12, ADR-0009 amendment 1 point 6): -mtune=knc starts from the
+   generic flags and changes only those with a documented or measured
+   reason; docs/research/knc-costs.md lists every flag.  The 0x66 and 0x67
+   prefixes cost 2 decode cycles (SSDG p.16), so promote HImode register
+   operations to SImode.  Runs before -mtune-ctrl, which still wins.  */
+void
+ix86_knc_tune_features (const gcc_options *opts)
+{
+  if (!opts->x_ix86_tune_string
+      || strcmp (opts->x_ix86_tune_string, "knc"))
+    return;
+  ix86_tune_features[X86_TUNE_FAST_PREFIX] = 0;
 }
 
 /* Costs that need KNC lowering knowledge rather than x86 mode splitting.  */
@@ -1074,6 +1089,20 @@ ix86_knc_vectorizer_params (struct gcc_options *opts,
   SET_OPTION_IF_UNSET (opts, opts_set, param_min_insn_to_prefetch_ratio, 1);
   SET_OPTION_IF_UNSET (opts, opts_set, param_prefetch_min_insn_to_mem_ratio,
 		       1);
+
+  /* S8-08 (E5-12): -mtune=knc starts functions on a 64-byte line.
+     In A/A pairs on the card (one assembly linked twice, the second copy
+     shifted half a line), m2_mat8 ran 1.34x apart at the generic 16 and
+     0.76x at 32, and every kernel stayed within 1.8% at 64.
+     ix86_default_align reads the per-processor table, not the KNC one, so
+     replace its choice here; an explicit -falign-functions= still wins, and
+     -Os or -fno-align-functions stays off.  Loops keep the default: 64 has
+     no max-skip, so an inner loop entered by fallthrough ran up to 63 bytes
+     of nops per outer trip (mat8 1.106x, mat16 1.173x slower on the card).  */
+  const processor_costs *knc = ix86_knc_tune_cost (opts, NULL);
+  if (knc && opts->x_flag_align_functions
+      && !opts_set->x_str_align_functions)
+    opts->x_str_align_functions = knc->align_func;
 }
 
 /* S8-10 (E5-16): a remote line crosses the ring, so data that other cores
