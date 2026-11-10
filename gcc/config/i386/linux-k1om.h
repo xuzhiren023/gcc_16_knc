@@ -72,3 +72,44 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
   {"cpu", "%{!mtune=*:%{!mcpu=*:%{!march=*:-mtune=knc}}}"}, \
   {"arch", "%{!march=*:-march=knc}"}, \
   {"tls", "%{!mtls-dialect=*:-mtls-dialect=%(VALUE)}"},
+
+/* S8-16: -mphinix is -O3 plus the measured -march=knc defaults written
+   out (docs/gcc-knc-flags.md), expanded here so -### shows it and cc1 never
+   sees the driver-only switches.  Each part yields to the user's own
+   setting of that option; no fast-math part (ADR-0003, ADR-0009 point 7).
+   knc-driver.cc draws the banner and the progress bar on a terminal.  */
+#define KNC_DRIVER_OPTIONS 1
+
+#undef SUBTARGET_DRIVER_SELF_SPECS
+#define SUBTARGET_DRIVER_SELF_SPECS \
+  "%{mphinix:%{march=*:%{!march=knc:%e-mphinix is only for -march=knc}} " \
+  "%{!O*:-O3} %{!march=*:-march=knc} %{!mtune=*:-mtune=knc} " \
+  "%{!fprefetch-loop-arrays:%{!fno-prefetch-loop-arrays:-fprefetch-loop-arrays}} " \
+  "%{!munroll-only-small-loops:%{!mno-unroll-only-small-loops:" \
+  "%{!funroll-loops:%{!fno-unroll-loops:-munroll-only-small-loops}}}} " \
+  "%{!malign-data=*:-malign-data=cacheline}} " \
+  "%:knc-driver(%{mphinix:phinix} %{mno-phinix-banner:nobanner} " \
+  "%{mprogress:progress} %{mno-progress:noprogress} %{E:E} %{S:S} " \
+  "%{fsyntax-only:S} %{c:c} %{save-temps*:temps} %{o*}) " \
+  "%<mphinix %<mphinix-banner %<mno-phinix-banner %<mprogress %<mno-progress"
+
+extern const char *knc_driver_spec (int, const char **);
+extern void knc_driver_infile (const char *, int);
+extern void knc_driver_job (const char *const *, int);
+
+#undef EXTRA_SPEC_FUNCTIONS
+#ifdef HAVE_LOCAL_CPU_DETECT
+#define EXTRA_SPEC_FUNCTIONS \
+  { "local_cpu_detect", host_detect_local_cpu }, \
+  { "knc-driver", knc_driver_spec },
+#else
+#define EXTRA_SPEC_FUNCTIONS { "knc-driver", knc_driver_spec },
+#endif
+
+/* gcc.cc: before the first job, and before each job.  */
+#define DRIVER_INFILES_HOOK(INFILES, N) \
+  for (int knc_i = 0; knc_i < (N); knc_i++) \
+    knc_driver_infile ((INFILES)[knc_i].name, \
+		       (INFILES)[knc_i].incompiler != NULL)
+#define DRIVER_EXECUTE_HOOK(ARGV) \
+  knc_driver_job ((ARGV), verbose_flag || print_version)

@@ -1,0 +1,4 @@
+# GCC-KNC driver decoration (S8-16): the -mphinix banner and progress bar.
+knc-driver.o: $(srcdir)/config/i386/knc-driver.cc
+	$(COMPILE) $<
+	$(POSTCOMPILE)
