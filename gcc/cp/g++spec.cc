@@ -318,6 +318,10 @@ lang_specific_driver (struct cl_decoded_option **in_decoded_options,
      should be set to NULL to signal that it need not be appended.  */
   if (which_library == USE_LIBCXX && LIBCXXABI != NULL)
     num_args += 4;
+#ifdef LIBSTDCXX_RUNTIME_GUARD
+  /* The runtime guard before -lstdc++.  */
+  num_args += (library > 0);
+#endif
   new_decoded_options = XNEWVEC (struct cl_decoded_option, num_args);
 
   i = 0;
@@ -412,6 +416,21 @@ lang_specific_driver (struct cl_decoded_option **in_decoded_options,
   /* Add `-lstdc++' if we haven't already done so.  */
   if (library > 0)
     {
+#ifdef LIBSTDCXX_RUNTIME_GUARD
+      /* A target-supplied linker script, found on the library path, that
+	 fails the link when -lstdc++ found an older libstdc++ than this
+	 compiler's.  It goes first, so that an EXTERN in it can pull an
+	 archive member from the -lstdc++ that follows.  */
+      if (which_library == USE_LIBSTDCXX)
+	{
+	  generate_option (OPT_l, (static_link || library > 1)
+			   ? LIBSTDCXX_RUNTIME_GUARD_STATIC
+			   : LIBSTDCXX_RUNTIME_GUARD, 1,
+			   CL_DRIVER, &new_decoded_options[j]);
+	  added_libraries++;
+	  j++;
+	}
+#endif
       if (need_experimental && which_library == USE_LIBSTDCXX)
 	{
 	  generate_option (OPT_l, "stdc++exp", 1, CL_DRIVER,
