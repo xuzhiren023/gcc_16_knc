@@ -1228,8 +1228,41 @@ ix86_knc_prefetch_distances (unsigned nstreams, unsigned *near, unsigned *far)
    unroll 4 beat 2 and 1 at 1 and 2 threads per core (25% then 17% over
    none).  16 admits two loads, an op, a store and their prefetches
    (S8-03) and keeps loops of more vector work at one copy.  Scalar loops
-   keep the generic rule.  Return false to leave NUNROLL to the caller.  */
+   keep the generic rule.  Return false to leave NUNROLL to the caller.
+
+   S8-20: a stream, at most one vector op per vector store, follows
+   knc-threads-per-core.  The S8-15 card run (2026-11-10) found M2
+   affine_f64 3-7% and short 2% slower unrolled 4 times.  affine_f64's
+   loop is a load, an FMA, a store and four prefetches: unroll 4 saves 5
+   of 44 insns per 4 lines, at 4 threads per core the other threads fill
+   the loop branch's issue slots and the L2 stream bounds the loop, and
+   the 3-copy remainder peel enters the loop by fall-through, so the loop
+   head loses its alignment.  short runs one vector iteration per call:
+   unroll 4's remainder dispatch (shift, add, and, two compares and a
+   taken branch) is pure cost, while unroll 2's single test costs nothing
+   over no unroll.  So a stream unrolls 2 times at 1-2 threads per core
+   and not at 3-4; two ops per store (stencil1) and no store (mat16)
+   gained at both densities and keep 4.  */
 #define KNC_SMALL_VECTOR_LOOP_INSNS 16
+
+/* True if the vector value SRC is computed rather than moved: an
+   arithmetic, conversion or FMA code, under a merge mask.  */
+static bool
+ix86_knc_vector_op_p (rtx src)
+{
+  if (GET_CODE (src) == VEC_MERGE)
+    src = XEXP (src, 0);
+  switch (GET_RTX_CLASS (GET_CODE (src)))
+    {
+    case RTX_BIN_ARITH:
+    case RTX_COMM_ARITH:
+      return true;
+    case RTX_UNARY:
+      return GET_CODE (src) != VEC_DUPLICATE;
+    default:
+      return GET_CODE (src) == FMA;
+    }
+}
 
 bool
 ix86_knc_small_loop_unroll (unsigned *nunroll, class loop *loop)
@@ -1237,24 +1270,40 @@ ix86_knc_small_loop_unroll (unsigned *nunroll, class loop *loop)
   if (!TARGET_KNC || loop->ninsns > KNC_SMALL_VECTOR_LOOP_INSNS)
     return false;
   bool vector = false;
+  unsigned ops = 0, stores = 0;
   basic_block *bbs = get_loop_body (loop);
   subrtx_iterator::array_type array;
-  for (unsigned i = 0; i < loop->num_nodes && !vector; i++)
+  for (unsigned i = 0; i < loop->num_nodes; i++)
     {
       rtx_insn *insn;
       FOR_BB_INSNS (bbs[i], insn)
 	if (NONDEBUG_INSN_P (insn))
-	  FOR_EACH_SUBRTX (iter, array, PATTERN (insn), NONCONST)
-	    if (ix86_knc_packed_mode_p (GET_MODE (*iter)))
+	  {
+	    rtx set = single_set (insn);
+	    if (set && ix86_knc_packed_mode_p (GET_MODE (SET_DEST (set))))
 	      {
-		vector = true;
-		break;
+		if (MEM_P (SET_DEST (set)))
+		  stores++;
+		else if (ix86_knc_vector_op_p (SET_SRC (set)))
+		  ops++;
 	      }
+	    if (!vector)
+	      FOR_EACH_SUBRTX (iter, array, PATTERN (insn), NONCONST)
+		if (ix86_knc_packed_mode_p (GET_MODE (*iter)))
+		  {
+		    vector = true;
+		    break;
+		  }
+	  }
     }
   free (bbs);
-  if (vector)
+  if (!vector)
+    return false;
+  if (stores && ops <= stores)
+    *nunroll = MIN (*nunroll, knc_threads_per_core >= 3 ? 1 : 2);
+  else
     *nunroll = MIN (*nunroll, 4);
-  return vector;
+  return true;
 }
 
 /* KNC scalar transport admits XImode, but its packed vector ABI belongs
