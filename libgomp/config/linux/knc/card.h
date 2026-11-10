@@ -275,15 +275,24 @@ gomp_knc_read_mhz (const char *root)
   return (unsigned int) (mhz + 0.5);
 }
 
-/* The default spin count: 3 msec at MHZ in DELAY periods of DELAY cycles
-   (spincount.h); 103125 at 1100 MHz and the default delay of 32.  */
+/* The spin count that spins MSEC msec at MHZ in DELAY periods of DELAY
+   cycles, at least 1.  */
+
+static inline unsigned long long
+gomp_knc_spincount (unsigned int msec, unsigned int mhz, unsigned int delay)
+{
+  unsigned long long count = 1000ULL * msec * mhz / delay;
+
+  return count ? count : 1;
+}
+
+/* The default spin count: 3 msec (spincount.h); 103125 at 1100 MHz and the
+   default delay of 32.  */
 
 static inline unsigned long long
 gomp_knc_default_spincount (unsigned int mhz, unsigned int delay)
 {
-  unsigned long long count = 3000ULL * mhz / delay;
-
-  return count ? count : 1;
+  return gomp_knc_spincount (3, mhz, delay);
 }
 
 /* A KNC card numbers its logical CPUs so that the four hardware threads of
