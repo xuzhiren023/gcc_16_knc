@@ -43,6 +43,22 @@ static bool knc_decided;
 static const char **knc_inputs;
 static int knc_n_inputs;
 static int knc_input;
+/* S9-13: -mknc-card=native's note, held until the banner is out: -1 none,
+   0 no card found, else the core count of a card of no known model.  */
+static int knc_card_note = -1;
+
+static void
+knc_card_note_flush ()
+{
+  if (knc_card_note == 0)
+    inform (UNKNOWN_LOCATION, "%<-mknc-card=native%>: no KNC card found; "
+	    "using %<-mknc-card=generic%>");
+  else if (knc_card_note > 0)
+    inform (UNKNOWN_LOCATION, "%<-mknc-card=native%>: a KNC with %d "
+	    "cores is no known model; using %<-mknc-card=generic%>",
+	    knc_card_note);
+  knc_card_note = -1;
+}
 static int knc_total;
 static int knc_job;
 static bool knc_stop_c, knc_stop_S, knc_stop_E, knc_temps;
@@ -334,6 +350,7 @@ knc_driver_job (const char *const *argv, int verbose)
   if (verbose || to_stdout || (!(force && !strcmp (force, "1")) && !isatty (2)))
     {
       knc_banner = knc_progress = false;
+      knc_card_note_flush ();
       return;
     }
   if (knc_banner)
@@ -346,6 +363,7 @@ knc_driver_job (const char *const *argv, int verbose)
 	}
       knc_write ("\n", 1);
     }
+  knc_card_note_flush ();
   if (knc_progress && !knc_bar_on)
     knc_bar_start ();
   if (knc_bar_on)
@@ -504,13 +522,18 @@ knc_card_spec (int argc, const char **argv)
       int cores = 0;
       model = knc_card_on_card (root, &cores);
       if (model == -2)
-	inform (UNKNOWN_LOCATION, "%<-mknc-card=native%>: a KNC with %d "
-		"cores is no known model; using %<-mknc-card=generic%>", cores);
+	knc_card_note = cores;
       else if (model == -1 && (model = knc_card_on_host (root)) < 0)
-	inform (UNKNOWN_LOCATION, "%<-mknc-card=native%>: no KNC card found; "
-		"using %<-mknc-card=generic%>");
+	knc_card_note = 0;
       if (model < 0)
 	model = KNC_CARD_GENERIC;
+      /* %:knc-driver, earlier in the self spec, decided on the banner;
+	 when one may come, knc_driver_job prints the note after it, or exit
+	 does when no job runs (-###).  */
+      if (!knc_decided || (!knc_banner && !knc_progress))
+	knc_card_note_flush ();
+      else if (knc_card_note >= 0)
+	atexit (knc_card_note_flush);
     }
   else if (model < 0)
     fatal_error (UNKNOWN_LOCATION, "unknown %<-mknc-card=%> value %qs; use "
