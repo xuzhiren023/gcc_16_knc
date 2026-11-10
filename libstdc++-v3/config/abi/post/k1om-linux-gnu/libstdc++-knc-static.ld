@@ -1,4 +1,4 @@
-/* Implicit linker script for KNC (k1om), named by g++ after a static -lstdc++
+/* Implicit linker script for KNC (k1om), named by g++ before a static -lstdc++
    (-static-libstdc++ or -static; LIBSTDCXX_RUNTIME_GUARD_STATIC in
    gcc/config/i386/linux-k1om.h).
 

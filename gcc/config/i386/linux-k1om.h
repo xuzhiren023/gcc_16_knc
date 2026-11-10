@@ -59,7 +59,7 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
    explicit until that separate runtime is provided by this port.  */
 #undef TARGET_PROVIDES_LIBATOMIC
 
-/* g++ names one of these implicit linker scripts after -lstdc++ (cp/g++spec.cc).
+/* g++ names one of these implicit linker scripts before -lstdc++ (cp/g++spec.cc).
    libstdc++ installs them on k1om (config/abi/post/k1om-linux-gnu); they fail
    a link whose -lstdc++ found an older library, such as the card's GCC 5 one.  */
 #define LIBSTDCXX_RUNTIME_GUARD ":libstdc++-knc.ld"

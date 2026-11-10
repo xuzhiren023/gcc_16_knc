@@ -376,7 +376,7 @@ version_dep =
 endif
 
 
-# KNC (k1om): the implicit linker scripts g++ names after -lstdc++ there
+# KNC (k1om): the implicit linker scripts g++ names before -lstdc++ there
 # (LIBSTDCXX_RUNTIME_GUARD in gcc/config/i386/linux-k1om.h).  They fail a link
 # whose -lstdc++ found an older library than this one.
 knc_runtime_guard = $(if $(filter k1om,$(host_cpu)),libstdc++-knc.ld libstdc++-knc-static.ld)

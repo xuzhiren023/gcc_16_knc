@@ -1113,7 +1113,7 @@ compatibility-condvar.o: compatibility-condvar.cc
 @ENABLE_SYMVERS_DARWIN_TRUE@@ENABLE_SYMVERS_TRUE@	    sed 's,/\([^/.]*\)\.la,/.libs/\1.a,g'` \
 @ENABLE_SYMVERS_DARWIN_TRUE@@ENABLE_SYMVERS_TRUE@	 > $@ || (rm -f $@ ; exit 1)
 
-# KNC (k1om): the implicit linker scripts g++ names after -lstdc++ there
+# KNC (k1om): the implicit linker scripts g++ names before -lstdc++ there
 # (LIBSTDCXX_RUNTIME_GUARD in gcc/config/i386/linux-k1om.h).  They fail a link
 # whose -lstdc++ found an older library than this one.
 knc_runtime_guard = $(if $(filter k1om,$(host_cpu)),libstdc++-knc.ld libstdc++-knc-static.ld)

@@ -1,4 +1,4 @@
-/* Implicit linker script for KNC (k1om), named by g++ after a shared -lstdc++
+/* Implicit linker script for KNC (k1om), named by g++ before a shared -lstdc++
    (LIBSTDCXX_RUNTIME_GUARD in gcc/config/i386/linux-k1om.h).
 
    The card and the MPSS toolchain carry the GCC 5 libstdc++.so.6.0.21.  A -L
