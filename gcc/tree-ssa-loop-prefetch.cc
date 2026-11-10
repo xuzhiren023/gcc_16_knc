@@ -685,6 +685,27 @@ gather_memory_references (class loop *loop, bool *no_other_refs, unsigned *ref_c
 	{
 	  stmt = gsi_stmt (bsi);
 
+	  /* A masked load or store accesses a vector at its pointer argument,
+	     as get_references_in_stmt models it.  */
+	  if ((gimple_call_internal_p (stmt, IFN_MASK_LOAD)
+	       && gimple_call_lhs (stmt))
+	      || gimple_call_internal_p (stmt, IFN_MASK_STORE))
+	    {
+	      bool write_p = gimple_call_internal_p (stmt, IFN_MASK_STORE);
+	      tree alias = gimple_call_arg (stmt, 1);
+	      tree type = TREE_TYPE (write_p ? gimple_call_arg (stmt, 3)
+				     : gimple_call_lhs (stmt));
+	      unsigned align = tree_to_shwi (alias);
+	      if (TYPE_ALIGN (type) != align)
+		type = build_aligned_type (type, align);
+	      tree ref = fold_build2 (MEM_REF, type, gimple_call_arg (stmt, 0),
+				      build_int_cst (TREE_TYPE (alias), 0));
+	      *no_other_refs &= gather_memory_references_ref (loop, &refs, ref,
+							      write_p, stmt);
+	      *ref_count += 1;
+	      continue;
+	    }
+
 	  if (gimple_code (stmt) != GIMPLE_ASSIGN)
 	    {
 	      if (gimple_vuse (stmt)
@@ -1387,12 +1408,13 @@ nontemporal_store_p (struct mem_ref *ref, bool two_level,
   machine_mode mode;
   enum insn_code code;
 
-  /* REF must be a write that is not reused.  We require it to be independent
-     on all other memory references in the loop, as the nontemporal stores may
-     be reordered with respect to other memory references.  Under the guard
+  /* REF must be a plain (not masked) write that is not reused.  We require it
+     to be independent on all other memory references in the loop, as the
+     nontemporal stores may be reordered with respect to other memory references.  Under the guard
      every reuse left is across an outer loop, a whole footprint away, except
      a line another reference of the group has just brought in.  */
   if (!ref->write_p
+      || !is_gimple_assign (ref->stmt)
       || !ref->independent_p
       || (footprint_guarded
 	  ? ref->prefetch_before != PREFETCH_ALL
