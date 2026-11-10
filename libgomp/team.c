@@ -176,7 +176,7 @@ gomp_new_team (unsigned nthreads)
   if (team == NULL)
     {
       size_t extra = sizeof (team->ordered_release[0])
-		     + sizeof (team->implicit_task[0]);
+		     + GOMP_IMPLICIT_TASK_STRIDE;
 #ifdef GOMP_USE_ALIGNED_WORK_SHARES
       team = gomp_aligned_alloc (__alignof (struct gomp_team),
 				 sizeof (*team) + nthreads * extra);
@@ -207,7 +207,7 @@ gomp_new_team (unsigned nthreads)
   team->work_shares[i].next_free = NULL;
 
   gomp_sem_init (&team->master_release, 0);
-  team->ordered_release = (void *) &team->implicit_task[nthreads];
+  team->ordered_release = (void *) gomp_implicit_task (team, nthreads);
   team->ordered_release[0] = &team->master_release;
 
   priority_queue_init (&team->task_queue);
@@ -655,11 +655,11 @@ gomp_team_start (void (*fn) (void *), void *data, unsigned nthreads,
 	  nthr->ts.static_trip = 0;
 	  nthr->num_teams = thr->num_teams;
 	  nthr->team_num = thr->team_num;
-	  nthr->task = &team->implicit_task[i];
+	  nthr->task = gomp_implicit_task (team, i);
 	  nthr->place = place;
 	  gomp_init_task (nthr->task, task, icv);
-	  team->implicit_task[i].icv.nthreads_var = nthreads_var;
-	  team->implicit_task[i].icv.bind_var = bind_var;
+	  gomp_implicit_task (team, i)->icv.nthreads_var = nthreads_var;
+	  gomp_implicit_task (team, i)->icv.bind_var = bind_var;
 	  nthr->task->taskgroup = taskgroup;
 	  nthr->fn = fn;
 	  nthr->data = data;
@@ -847,10 +847,10 @@ gomp_team_start (void (*fn) (void *), void *data, unsigned nthreads,
       start_data->ts.static_trip = 0;
       start_data->num_teams = thr->num_teams;
       start_data->team_num = thr->team_num;
-      start_data->task = &team->implicit_task[i];
+      start_data->task = gomp_implicit_task (team, i);
       gomp_init_task (start_data->task, task, icv);
-      team->implicit_task[i].icv.nthreads_var = nthreads_var;
-      team->implicit_task[i].icv.bind_var = bind_var;
+      gomp_implicit_task (team, i)->icv.nthreads_var = nthreads_var;
+      gomp_implicit_task (team, i)->icv.bind_var = bind_var;
       start_data->task->taskgroup = taskgroup;
       start_data->thread_pool = pool;
       start_data->nested = nested;
