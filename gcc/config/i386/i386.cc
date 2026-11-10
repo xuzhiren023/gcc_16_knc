@@ -27394,6 +27394,8 @@ ix86_loop_unroll_adjust (unsigned nunroll, class loop *loop)
      specified.  */
   if (ix86_unroll_only_small_loops && !loop->unroll)
     {
+      if (TARGET_KNC && ix86_knc_small_loop_unroll (&nunroll, loop))
+	return nunroll;
       if (loop->ninsns <= ix86_cost->small_unroll_ninsns)
 	return MIN (nunroll, ix86_cost->small_unroll_factor);
       else
