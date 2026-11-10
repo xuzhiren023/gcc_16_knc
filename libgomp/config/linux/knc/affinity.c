@@ -34,6 +34,11 @@ static void gomp_linux_init_affinity (void);
 #include "../affinity.c"
 #undef gomp_init_affinity
 
+/* The cores of the default place list, for the team barrier's groups
+   (bar.h); a 7120's 60 cores without the OS core until the list is built,
+   and when the places come from the environment.  */
+unsigned int gomp_knc_ncores = 60;
+
 #ifdef HAVE_PTHREAD_AFFINITY_NP
 
 /* A KNC card numbers its logical CPUs so that the four hardware threads of
@@ -164,6 +169,7 @@ gomp_knc_init_core_places (void)
       }
   free (core);
 
+  gomp_knc_ncores = gomp_places_list_len;
   gomp_available_cpus = cpus;
   none = gomp_get_initial_icv_item (GOMP_DEVICE_NUM_FOR_NO_SUFFIX);
   all = gomp_get_initial_icv_item (GOMP_DEVICE_NUM_FOR_ALL);
