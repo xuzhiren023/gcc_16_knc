@@ -26294,8 +26294,7 @@ ix86_vector_costs::add_stmt_cost (int count, vect_cost_for_stmt kind,
   if (TARGET_KNC && ix86_knc_sqrt_stmt_p (kind, stmt_info, vectype))
     {
       unsigned cost = adjust_cost_for_freq (stmt_info, where, count
-	* ix86_knc_sqrt_stmt_cost (kind == scalar_stmt
-				  ? TREE_TYPE (vectype) : vectype));
+	* ix86_knc_sqrt_stmt_cost (kind, vectype));
       m_costs[where] += cost;
       return cost;
     }
