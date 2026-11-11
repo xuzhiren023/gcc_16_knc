@@ -2849,10 +2849,17 @@
    (set_attr "mode" "<ssescalarmode>")])
 
 (define_expand "div<mode>3"
-  [(set (match_operand:VF2 0 "register_operand")
-	(div:VF2 (match_operand:VF2 1 "register_operand")
-		  (match_operand:VF2 2 "vector_operand")))]
-  "TARGET_SSE2")
+  [(set (match_operand:VF2_KNC 0 "register_operand")
+	(div:VF2_KNC (match_operand:VF2_KNC 1 "register_operand")
+		  (match_operand:VF2_KNC 2 "vector_operand")))]
+  "TARGET_SSE2 || (TARGET_KNC && <MODE>mode == V8DFmode)"
+{
+  if (TARGET_KNC)
+    {
+      ix86_knc_expand_div (operands, false);
+      DONE;
+    }
+})
 
 (define_expand "div<mode>3"
   [(set (match_operand:VHF_AVX512VL 0 "register_operand")
@@ -3095,9 +3102,16 @@
    (set_attr "mode" "<MODE>")])
 
 (define_expand "sqrt<mode>2"
-  [(set (match_operand:VF2HB 0 "register_operand")
-	(sqrt:VF2HB (match_operand:VF2HB 1 "vector_operand")))]
-  "TARGET_SSE2")
+  [(set (match_operand:VF2HB_KNC 0 "register_operand")
+	(sqrt:VF2HB_KNC (match_operand:VF2HB_KNC 1 "vector_operand")))]
+  "TARGET_SSE2 || (TARGET_KNC && <MODE>mode == V8DFmode)"
+{
+  if (TARGET_KNC)
+    {
+      ix86_knc_expand_sqrt (operands);
+      DONE;
+    }
+})
 
 (define_expand "sqrt<mode>2"
   [(set (match_operand:VF1_KNC 0 "register_operand")
