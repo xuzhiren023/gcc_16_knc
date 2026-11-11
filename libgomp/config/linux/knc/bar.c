@@ -27,7 +27,7 @@
    or wakes the generation word, this one waits on the caller's group or
    notifies the groups.  */
 
-#ifdef GOMP_KNC_FLAT_BARRIER
+#ifndef GOMP_KNC_GROUP_BARRIER
 #include "../bar.c"
 #else
 
@@ -387,4 +387,4 @@ gomp_simple_barrier_wait_last (gomp_simple_barrier_t *bar)
   gomp_knc_dock_wait (bar, true);
 }
 
-#endif /* !GOMP_KNC_FLAT_BARRIER */
+#endif /* GOMP_KNC_GROUP_BARRIER */

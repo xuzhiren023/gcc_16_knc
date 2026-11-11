@@ -42,15 +42,17 @@
 
    The barrier type is used for team barriers only, whose thread count never
    changes (gomp_new_team); the thread pool's dock keeps the one-level
-   barrier (simple-bar.h).  -DGOMP_KNC_FLAT_BARRIER builds the Linux barrier
-   instead, as the baseline to measure against.  */
+   barrier (simple-bar.h).  It is built only with -DGOMP_KNC_GROUP_BARRIER:
+   on the card it was 1.5 to 1.7 times slower per barrier than the Linux
+   barrier at 60 to 240 threads (S9-09 measurements), so a default build has
+   the Linux barrier.  */
 
 /* The cores the default place list holds (affinity.c); env.c calls
    gomp_knc_init_ncores with either barrier.  */
 extern unsigned int gomp_knc_ncores;
 extern void gomp_knc_init_ncores (void);
 
-#ifdef GOMP_KNC_FLAT_BARRIER
+#ifndef GOMP_KNC_GROUP_BARRIER
 #include "../bar.h"
 #else
 #ifndef GOMP_BARRIER_H
@@ -234,4 +236,4 @@ gomp_barrier_has_completed (gomp_barrier_state_t state, gomp_barrier_t *bar)
 }
 
 #endif /* GOMP_BARRIER_H */
-#endif /* !GOMP_KNC_FLAT_BARRIER */
+#endif /* GOMP_KNC_GROUP_BARRIER */

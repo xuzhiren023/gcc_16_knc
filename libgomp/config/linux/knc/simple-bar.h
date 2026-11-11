@@ -22,13 +22,14 @@
    see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
    <http://www.gnu.org/licenses/>.  */
 
-/* The barrier of the thread pool's dock on KNC.  team.c grows the dock while
-   threads wait on it (gomp_simple_barrier_reinit), which the grouped team
-   barrier of bar.h cannot do, so the dock is the one-level Linux barrier
-   without the team flags: config/posix/simple-bar.h over config/linux/bar.h,
-   with its own type.  */
+/* The barrier of the thread pool's dock on KNC with -DGOMP_KNC_GROUP_BARRIER.
+   team.c grows the dock while threads wait on it (gomp_simple_barrier_reinit),
+   which the grouped team barrier of bar.h cannot do, so the dock is the
+   one-level Linux barrier without the team flags: config/posix/simple-bar.h
+   over config/linux/bar.h, with its own type.  A default build has
+   config/posix/simple-bar.h itself.  */
 
-#ifdef GOMP_KNC_FLAT_BARRIER
+#ifndef GOMP_KNC_GROUP_BARRIER
 #include "../../posix/simple-bar.h"
 #else
 #ifndef GOMP_SIMPLE_BARRIER_H
@@ -68,4 +69,4 @@ extern void gomp_simple_barrier_wait (gomp_simple_barrier_t *);
 extern void gomp_simple_barrier_wait_last (gomp_simple_barrier_t *);
 
 #endif /* GOMP_SIMPLE_BARRIER_H */
-#endif /* !GOMP_KNC_FLAT_BARRIER */
+#endif /* GOMP_KNC_GROUP_BARRIER */
