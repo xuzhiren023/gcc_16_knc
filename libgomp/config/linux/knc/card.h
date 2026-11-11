@@ -45,6 +45,19 @@
 /* The core clock when /proc/cpuinfo has no "cpu MHz": a 5110P's.  */
 #define GOMP_KNC_MHZ_DEFAULT 1100
 
+/* The default operand of the DELAY in a spin iteration (mutex.c,
+   GOMP_KNC_DELAY), in cycles.  On the card, three siblings spinning with 32
+   slowed the worker on their core by 6.8%, with 128 by 1.1%, and empty
+   fork-join regions were 2.4-3.3% faster (S9-08 in GCC-KNC).  */
+#define GOMP_KNC_DELAY_DEFAULT 128
+
+/* How long a waiting thread spins by default before it sleeps, in msec
+   (spincount.h); GOMP_SPINCOUNT and OMP_WAIT_POLICY override it.  On the
+   card, entering a region after 10 msec of serial work took 3.75 msec with
+   3 msec of spin (the threads slept and had to be woken) and 0.30 msec with
+   200 (S9-15 in GCC-KNC).  */
+#define GOMP_KNC_SPIN_MSEC 200
+
 /* The cores the barrier groups count when the card's topology cannot be
    read: a 7120's 61 without the OS core.  */
 #define GOMP_KNC_NCORES_DEFAULT 60
@@ -55,11 +68,6 @@
 /* The address space glibc 2.21 reserves for each arena but the main one:
    HEAP_MAX_SIZE, 2 * DEFAULT_MMAP_THRESHOLD_MAX on LP64.  */
 #define GOMP_KNC_ARENA_BYTES (64ULL << 20)
-
-/* The share of MemTotal, in percent, that the arenas and the thread stacks
-   may reserve when neither RLIMIT_AS nor strict overcommit bounds them.
-   The lead sets it from measurement 7 (ADR-0012 point 4).  */
-#define GOMP_KNC_ARENA_MEM_PERCENT 50
 
 /* The smallest cap libgomp derives; fewer arenas than this make the threads
    queue on the arena locks.  The lead sets it from measurement 7.  */
@@ -98,8 +106,7 @@ enum gomp_knc_budget
 {
   GOMP_KNC_BUDGET_NONE,		/* Nothing bounds the reservations.  */
   GOMP_KNC_BUDGET_RLIMIT_AS,
-  GOMP_KNC_BUDGET_COMMIT_LIMIT,
-  GOMP_KNC_BUDGET_MEM_TOTAL
+  GOMP_KNC_BUDGET_COMMIT_LIMIT
 };
 
 /* What libgomp decided, for omp_display_env.  */
@@ -117,7 +124,10 @@ struct gomp_knc_arena
    thread stacks do not fit in the budget; then the largest count that fits,
    but no fewer than GOMP_KNC_ARENA_MIN (or the CPUs, if fewer).  The budget
    is RLIMIT_AS when finite and CommitLimit under strict overcommit, the
-   smaller of the two when both apply; otherwise a share of MemTotal.  */
+   smaller of the two when both apply.  With neither, reservations cost no
+   memory and nothing bounds them, so there is one arena per CPU: on the
+   card about 169 arenas ran a malloc-heavy job in 64-67 s against 140-149 s
+   at a cap of 60-64 (measurement 7 in GCC-KNC).  */
 
 static inline unsigned long
 gomp_knc_arena_cap (const struct gomp_knc_mem *in, struct gomp_knc_arena *out)
@@ -136,11 +146,6 @@ gomp_knc_arena_cap (const struct gomp_knc_mem *in, struct gomp_knc_arena *out)
     {
       budget = in->commit_limit;
       kind = GOMP_KNC_BUDGET_COMMIT_LIMIT;
-    }
-  if (kind == GOMP_KNC_BUDGET_NONE && in->mem_total != 0)
-    {
-      budget = in->mem_total / 100 * GOMP_KNC_ARENA_MEM_PERCENT;
-      kind = GOMP_KNC_BUDGET_MEM_TOTAL;
     }
 
   if (kind == GOMP_KNC_BUDGET_NONE)
@@ -189,7 +194,7 @@ static inline void
 gomp_knc_display_arena (FILE *f, const struct gomp_knc_arena *a)
 {
   static const char *const kinds[]
-    = { "none", "RLIMIT_AS", "CommitLimit", "MemTotal share" };
+    = { "none", "RLIMIT_AS", "CommitLimit" };
 
   if (a->source == GOMP_KNC_ARENA_USER)
     {
@@ -286,13 +291,13 @@ gomp_knc_spincount (unsigned int msec, unsigned int mhz, unsigned int delay)
   return count ? count : 1;
 }
 
-/* The default spin count: 3 msec (spincount.h); 103125 at 1100 MHz and the
-   default delay of 32.  */
+/* The default spin count: GOMP_KNC_SPIN_MSEC at MHZ in DELAY periods
+   (spincount.h).  */
 
 static inline unsigned long long
 gomp_knc_default_spincount (unsigned int mhz, unsigned int delay)
 {
-  return gomp_knc_spincount (3, mhz, delay);
+  return gomp_knc_spincount (GOMP_KNC_SPIN_MSEC, mhz, delay);
 }
 
 /* A KNC card numbers its logical CPUs so that the four hardware threads of
