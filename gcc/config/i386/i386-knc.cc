@@ -2050,9 +2050,11 @@ ix86_knc_expand_sqrt (rtx *operands, bool conditional)
 
 /* Instruction counts, not measured latency.  Constants and transfers are
    costed separately.  Scalar SF sqrt uses x87; the vector sequence has
-   19 instructions for sixteen elements (research section 2.5), and
-   KNC_SQRT_DF_INSNS for eight doubles (S10-09, knc_expand_sqrt_df).  */
-#define KNC_SQRT_DF_INSNS 31
+   19 instructions for sixteen elements (research section 2.5).  S10-09:
+   the V8DF counts are the vector instructions of the fast paths as
+   emitted at -O2 for eight doubles, register copies included (31 and 29
+   without them; section 3 estimated 31 and 34).  */
+#define KNC_SQRT_DF_INSNS 35
 #define KNC_DIV_DF_INSNS 34
 bool
 ix86_knc_sqrt_rtx_cost (rtx x, machine_mode mode, int *total)
@@ -2087,8 +2089,20 @@ ix86_knc_sqrt_rtx_cost (rtx x, machine_mode mode, int *total)
 bool
 ix86_knc_sqrt_stmt_p (int kind, stmt_vec_info stmt, tree vectype)
 {
-  if ((kind != vector_stmt && kind != scalar_stmt) || !stmt || !vectype
-      || (TYPE_MODE (vectype) != V16SFmode && TYPE_MODE (vectype) != V8DFmode))
+  if (!stmt)
+    return false;
+  if (kind == scalar_stmt && !vectype)
+    {
+      /* S10-09: the scalar baseline carries no vector type.  A double
+	 root there is an x87 fsqrt; costed as a plain statement it hid
+	 38 cycles per element and kept such loops scalar.  */
+      tree lhs = gimple_get_lhs (stmt->stmt);
+      if (!lhs || TYPE_MODE (TREE_TYPE (lhs)) != DFmode)
+	return false;
+    }
+  else if ((kind != vector_stmt && kind != scalar_stmt) || !vectype
+	   || (TYPE_MODE (vectype) != V16SFmode
+	       && TYPE_MODE (vectype) != V8DFmode))
     return false;
   switch (gimple_call_combined_fn (stmt->stmt))
     {
@@ -2101,9 +2115,9 @@ ix86_knc_sqrt_stmt_p (int kind, stmt_vec_info stmt, tree vectype)
 }
 
 unsigned
-ix86_knc_sqrt_stmt_cost (tree vectype)
+ix86_knc_sqrt_stmt_cost (int kind, tree vectype)
 {
-  if (!VECTOR_TYPE_P (vectype))
+  if (kind == scalar_stmt)
     return ix86_cost->fsqrt;
   return ((TYPE_MODE (vectype) == V8DFmode ? KNC_SQRT_DF_INSNS : 19)
 	  * ix86_cost->sse_op);
@@ -2375,13 +2389,15 @@ knc_df_int (HOST_WIDE_INT n)
   return force_reg (V8DFmode, gen_const_vec_duplicate (V8DFmode, c));
 }
 
-/* The lanes of MASK where A PRED B, PRED being IMCI's 3-bit predicate
-   (0 eq, 1 lt, 2 le, 3 unord, 4 neq); no flag is raised.  */
+/* The lanes of MASK, or of all eight without one, where A PRED B, PRED
+   being IMCI's 3-bit predicate (0 eq, 1 lt, 2 le, 3 unord, 4 neq); no
+   flag is raised.  */
 static rtx
 knc_df_cmp (int pred, rtx a, rtx b, rtx mask)
 {
   rtx k = gen_reg_rtx (QImode);
-  emit_insn (gen_knc_div_cmp_df (k, a, b, GEN_INT (pred), mask));
+  emit_insn (mask ? gen_knc_div_cmp_df (k, a, b, GEN_INT (pred), mask)
+		  : gen_knc_div_cmp_all_df (k, a, b, GEN_INT (pred)));
   return k;
 }
 
@@ -2426,7 +2442,8 @@ knc_expand_div_df (rtx *operands, bool conditional)
   const machine_mode mode = V8DFmode;
   rtx a = force_reg (mode, operands[conditional ? 2 : 1]);
   rtx b = force_reg (mode, operands[conditional ? 3 : 2]);
-  rtx active = conditional ? operands[1] : force_reg (QImode, constm1_rtx);
+  /* Null when every lane is active.  */
+  rtx active = conditional ? operands[1] : NULL_RTX;
   rtx zero = force_reg (mode, CONST0_RTX (mode));
   rtx one = knc_df_const (HOST_WIDE_INT_UC (0x3ff0000000000000));
   rtx ma = gen_reg_rtx (mode), mb = gen_reg_rtx (mode);
@@ -2484,7 +2501,7 @@ knc_expand_div_df (rtx *operands, bool conditional)
 			   NULL_RTX, QImode, 1, done,
 			   profile_probability::very_likely ());
 
-  rtx rest = knc_div_bin (XOR, active, fast);
+  rtx rest = knc_div_bin (XOR, fast, conditional ? active : constm1_rtx);
   rtx t = gen_reg_rtx (mode);
   emit_insn (gen_knc_div_sub_df (t, kf, kf));
   rtx special = knc_df_cmp (4, t, zero, rest);
@@ -2577,7 +2594,7 @@ knc_expand_sqrt_df (rtx *operands, bool conditional)
 {
   const machine_mode mode = V8DFmode;
   rtx x = force_reg (mode, operands[conditional ? 2 : 1]);
-  rtx active = conditional ? operands[1] : force_reg (QImode, constm1_rtx);
+  rtx active = conditional ? operands[1] : NULL_RTX;
   rtx zero = force_reg (mode, CONST0_RTX (mode));
   rtx inf = knc_df_const (HOST_WIDE_INT_UC (0x7ff0000000000000));
   rtx m = gen_reg_rtx (mode), e = gen_reg_rtx (mode);
@@ -2632,7 +2649,9 @@ knc_expand_sqrt_df (rtx *operands, bool conditional)
   emit_insn (gen_knc_sqrt_invalid_df (result, result, inf, kneg));
   rtx table = force_reg (V8DImode,
 			 gen_const_vec_duplicate (V8DImode, GEN_INT (0x206ad)));
-  emit_insn (gen_knc_sqrt_fixup_df (result, result, x, table, active));
+  emit_insn (conditional
+	     ? gen_knc_sqrt_fixup_df (result, result, x, table, active)
+	     : gen_knc_sqrt_fixup_all_df (result, result, x, table));
   if (conditional)
     result = knc_div_blend (active, result, force_reg (mode, operands[3]));
   emit_move_insn (operands[0], result);

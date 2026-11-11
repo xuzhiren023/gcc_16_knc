@@ -2183,6 +2183,19 @@
    (set_attr "length_immediate" "1")
    (set_attr "mode" "XI")])
 
+;; The same over all eight lanes.
+(define_insn "knc_div_cmp_all_df"
+  [(set (match_operand:QI 0 "register_operand" "=YK")
+        (unspec:QI [(match_operand:V8DF 1 "register_operand" "YJ")
+                    (match_operand:V8DF 2 "register_operand" "YJ")
+                    (match_operand:SI 3 "const_0_to_7_operand")]
+                   UNSPEC_KNC_DIV_CMP))]
+  "TARGET_KNC"
+  "vcmppd\t{%{sae%}, %3, %g2, %g1, %0|%0, %g1, %g2, %3, %{sae%}}"
+  [(set_attr "type" "ssecmp")
+   (set_attr "length_immediate" "1")
+   (set_attr "mode" "XI")])
+
 ;; Operand 3 - operand 1 * operand 2, rounded toward zero.
 (define_insn "knc_div_fnma_rz_df"
   [(set (match_operand:V8DF 0 "register_operand" "=YJ")
@@ -2250,6 +2263,16 @@
   "TARGET_KNC"
   "vsubpd\t{%g2, %g2, %g0%{%3%}|%g0%{%3%}, %g2, %g2}"
   [(set_attr "type" "sseadd") (set_attr "mode" "V8DF")])
+
+(define_insn "knc_sqrt_fixup_all_df"
+  [(set (match_operand:V8DF 0 "register_operand" "=YJ")
+        (unspec:V8DF [(match_operand:V8DF 1 "register_operand" "0")
+                      (match_operand:V8DF 2 "register_operand" "YJ")
+                      (match_operand:V8DI 3 "register_operand" "YJ")]
+                     UNSPEC_KNC_SQRT_FIXUP))]
+  "TARGET_KNC"
+  "vfixupnanpd\t{%g3, %g2, %g0|%g0, %g2, %g3}"
+  [(set_attr "type" "sse") (set_attr "mode" "V8DF")])
 
 ;; Masked, so that an inactive signalling NaN of cond_sqrt raises nothing.
 (define_insn "knc_sqrt_fixup_df"
