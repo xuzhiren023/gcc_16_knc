@@ -7125,8 +7125,9 @@ it loads (@code{mallopt (M_ARENA_MAX, @var{n})}): one per CPU it runs
 threads on, unless their reservations and the thread stacks do not fit in
 the budget, then the largest number that fits, but at least 8.  The budget
 is the @code{RLIMIT_AS} soft limit when it is finite and @code{CommitLimit}
-of @file{/proc/meminfo} when @file{/proc/sys/vm/overcommit_memory} is 2,
-otherwise half of @code{MemTotal}; the stacks count at the
+of @file{/proc/meminfo} when @file{/proc/sys/vm/overcommit_memory} is 2.
+With neither, reservations cost no memory and libgomp sets one arena per
+CPU.  The stacks count at the
 @env{OMP_STACKSIZE} size, else the @code{RLIMIT_STACK} size.  So the cap
 follows the card's memory and the job's limits, not one model.  A
 @env{MALLOC_ARENA_MAX} you set always wins.  Set @env{OMP_STACKSIZE} to the
@@ -7134,8 +7135,11 @@ stack size the program needs, for example @code{2M}.
 @item The core count of the team barrier's groups and the default spin
 count follow the card: the cores come from the topology in @file{/sys} or
 @file{/proc/cpuinfo} without the core of CPU 0, and the spin count is
-3 msec at the @code{cpu MHz} of @file{/proc/cpuinfo} (1100 MHz when it
-cannot be read).
+200 msec at the @code{cpu MHz} of @file{/proc/cpuinfo} (1100 MHz when it
+cannot be read), so that threads waiting between nearby parallel regions
+do not sleep.  Each spin iteration is a @code{DELAY} of 128 cycles, which
+leaves the other threads of the core their issue slots;
+@env{GOMP_KNC_DELAY} sets the count.
 @item @code{omp_display_env} in verbose mode
 (@code{OMP_DISPLAY_ENV=verbose}) shows @env{MALLOC_ARENA_MAX}, the arena
 cap and where it came from (the user, or derived with its budget) and,
