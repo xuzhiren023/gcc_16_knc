@@ -54,6 +54,8 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-vectorizer.h"
 #include "i386-builtins.h"
 #include "i386-options.h"
+#include "builtins.h"
+#include "stringpool.h"
 
 /* S6-03 docs/research/knc-characterization.md, measured 2026-11-06.
    Cost units below are per-core cycles (COSTS_N_INSNS), or twice cycles
