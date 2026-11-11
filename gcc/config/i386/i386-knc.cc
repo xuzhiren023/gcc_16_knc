@@ -34,6 +34,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "recog.h"
 #include "explow.h"
 #include "expr.h"
+#include "calls.h"
 #include "varasm.h"
 #include "target.h"
 #include "regs.h"
@@ -819,6 +820,9 @@ ix86_knc_expand_vector_move (machine_mode mode, rtx *operands)
     operands[1] = validize_mem (force_const_mem (mode, operands[1]));
   if (MEM_P (operands[0]) && !REG_P (operands[1]))
     operands[1] = force_reg (mode, operands[1]);
+  /* ADR-0014 point 1: a stack vector argument, as for V16HI above.  */
+  if (push_operand (operands[0], VOIDmode))
+    operands[0] = emit_move_resolve_push (mode, operands[0]);
   rtx mem = MEM_P (operands[0]) ? operands[0] : operands[1];
   if (MEM_P (mem)
       && MEM_ALIGN (mem) < GET_MODE_BITSIZE (GET_MODE_INNER (mode)))
@@ -1320,15 +1324,71 @@ ix86_knc_small_loop_unroll (unsigned *nunroll, class loop *loop)
   return true;
 }
 
-/* KNC scalar transport admits XImode, but its packed vector ABI belongs
-   to E3.  Reject these vector types before recursive ABI classification.  */
+/* ADR-0014 point 1: a by-value 64-byte vector of a packed mode travels
+   whole, in zmm0-zmm7 or a 64-byte aligned stack slot, by the shared
+   classifier's 512-bit vector rule.  Not as a field of an aggregate.  */
+static bool
+knc_vector_abi_type_p (const_tree type, machine_mode mode)
+{
+  return type && VECTOR_TYPE_P (type) && ix86_knc_packed_mode_p (mode);
+}
+
+/* KNC scalar transport admits XImode, which has no register ABI.  Reject
+   the vector types without one before recursive ABI classification.  */
 bool
 ix86_knc_check_abi_type (const_tree type, machine_mode mode)
 {
-  if (!ix86_knc_unsupported_abi_type_p (type, mode))
+  if (knc_vector_abi_type_p (type, mode)
+      || !ix86_knc_unsupported_abi_type_p (type, mode))
     return true;
   error ("unsupported KNC register ABI mode");
   return false;
+}
+
+/* TARGET_PASS_BY_REFERENCE entry.  A vector argument has its register ABI
+   only in a SysV function that is not variadic: ADR-0014 point 1 keeps
+   every vector argument of a variadic function an error, named or not.
+   CUM is null for queries outside a call, which va_arg checks itself.  */
+bool
+ix86_knc_check_abi_arg (const CUMULATIVE_ARGS *cum,
+			const function_arg_info &arg)
+{
+  if (knc_vector_abi_type_p (arg.type, arg.mode)
+      && cum
+      && (cum->stdarg || !arg.named || cum->call_abi != SYSV_ABI))
+    {
+      error ("unsupported KNC register ABI mode");
+      return false;
+    }
+  return ix86_knc_check_abi_type (arg.type, arg.mode);
+}
+
+/* TARGET_RETURN_IN_MEMORY entry: a vector result is in zmm0 for a SysV
+   function only.  */
+bool
+ix86_knc_check_abi_result (const_tree type, const_tree fntype)
+{
+  machine_mode mode = TYPE_MODE (type);
+  if (knc_vector_abi_type_p (type, mode)
+      && ix86_function_type_abi (fntype) != SYSV_ABI)
+    {
+      error ("unsupported KNC register ABI mode");
+      return false;
+    }
+  return ix86_knc_check_abi_type (type, mode);
+}
+
+/* va_arg of a vector type keeps its error (ADR-0014 point 1).  */
+bool
+ix86_knc_check_va_arg_type (const_tree type)
+{
+  machine_mode mode = TYPE_MODE (type);
+  if (knc_vector_abi_type_p (type, mode))
+    {
+      error ("unsupported KNC register ABI mode");
+      return false;
+    }
+  return ix86_knc_check_abi_type (type, mode);
 }
 
 /* Keep va_arg expansion well formed after the ABI diagnostic, like the
@@ -1344,14 +1404,16 @@ ix86_knc_va_arg_error (tree type)
 }
 
 /* Diagnose unsupported SSE vector/half/decimal ABI containers before a
-   hard register is constructed.  The classifier's private enum stays shared.  */
+   hard register is constructed.  The classifier's private enum stays shared.
+   A packed mode is a whole ZMM register (ADR-0014 point 1).  */
 bool
 ix86_knc_check_abi_mode (machine_mode mode, bool half_class)
 {
-  if (!VECTOR_MODE_P (mode)
-      && !DECIMAL_FLOAT_MODE_P (GET_MODE_INNER (mode))
-      && GET_MODE_INNER (mode) != HFmode
-      && GET_MODE_INNER (mode) != BFmode && !half_class)
+  if (ix86_knc_packed_mode_p (mode)
+      || (!VECTOR_MODE_P (mode)
+	  && !DECIMAL_FLOAT_MODE_P (GET_MODE_INNER (mode))
+	  && GET_MODE_INNER (mode) != HFmode
+	  && GET_MODE_INNER (mode) != BFmode && !half_class))
     return true;
   error ("unsupported KNC register ABI mode");
   return false;
