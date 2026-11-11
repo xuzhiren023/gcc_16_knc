@@ -45,6 +45,11 @@
    barrier (simple-bar.h).  -DGOMP_KNC_FLAT_BARRIER builds the Linux barrier
    instead, as the baseline to measure against.  */
 
+/* The cores the default place list holds (affinity.c); env.c calls
+   gomp_knc_init_ncores with either barrier.  */
+extern unsigned int gomp_knc_ncores;
+extern void gomp_knc_init_ncores (void);
+
 #ifdef GOMP_KNC_FLAT_BARRIER
 #include "../bar.h"
 #else
@@ -52,10 +57,6 @@
 #define GOMP_BARRIER_H 1
 
 #include "mutex.h"
-
-/* The cores the default place list holds (affinity.c).  */
-extern unsigned int gomp_knc_ncores;
-extern void gomp_knc_init_ncores (void);
 
 /* A card has at most 61 cores.  */
 #define GOMP_KNC_BAR_GROUPS	64
