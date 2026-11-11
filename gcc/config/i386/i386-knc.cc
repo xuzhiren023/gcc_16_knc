@@ -1160,9 +1160,12 @@ ix86_knc_vectorizer_params (struct gcc_options *opts,
    __knc_vmath_<name>_<lanes> for FN on 16 floats or 8 doubles (the v0 set:
    exp, log and pow; S10-07's v1a set: sin, cos, tan, log10, atan2, sinh,
    cosh and tanh, and atan on floats only, as the library has no 8-lane
-   atan), or NULL_TREE.  Its 64-byte vector arguments and result
-   travel in zmm (ADR-0014 point 1).  The library rounds to nearest within
-   about 1 ulp and keeps the IEEE special values, so unlike SVML it needs no
+   atan; S10-08's v1b set: acos, asin, cbrt, erf, erfc, exp2, exp10, expm1,
+   log1p, log2 and hypot), or NULL_TREE.  sincos needs no entry: it reaches
+   the vectorizer as cexpi, whose parts become the sin and cos calls.  The
+   entry point's 64-byte vector arguments and result travel in zmm (ADR-0014
+   point 1).  The library rounds to nearest within about 1 ulp (erfc on
+   doubles: 1.75) and keeps the IEEE special values, so unlike SVML it needs no
    fast-math flag; it never sets errno, and the vectorizer only asks once
    -fno-math-errno has made the scalar call const.  Not under
    -frounding-math: other rounding modes are not qualified.  */
@@ -1185,6 +1188,7 @@ ix86_knc_veclibabi (combined_fn fn, tree type_out, tree type_in)
     {
     CASE_CFN_POW:
     CASE_CFN_ATAN2:
+    CASE_CFN_HYPOT:
       binary = true;
       break;
 
@@ -1202,6 +1206,16 @@ ix86_knc_veclibabi (combined_fn fn, tree type_out, tree type_in)
     CASE_CFN_SINH:
     CASE_CFN_COSH:
     CASE_CFN_TANH:
+    CASE_CFN_ACOS:
+    CASE_CFN_ASIN:
+    CASE_CFN_CBRT:
+    CASE_CFN_ERF:
+    CASE_CFN_ERFC:
+    CASE_CFN_EXP2:
+    CASE_CFN_EXP10:
+    CASE_CFN_EXPM1:
+    CASE_CFN_LOG1P:
+    CASE_CFN_LOG2:
       break;
 
     default:
