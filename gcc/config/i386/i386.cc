@@ -3641,7 +3641,7 @@ ix86_function_arg (cumulative_args_t cum_v, const function_arg_info &arg)
 static bool
 ix86_pass_by_reference (cumulative_args_t cum_v, const function_arg_info &arg)
 {
-  if (TARGET_KNC && !ix86_knc_check_abi_type (arg.type, arg.mode))
+  if (TARGET_KNC && !ix86_knc_check_abi_arg (get_cumulative_args (cum_v), arg))
     return true;
   CUMULATIVE_ARGS *cum = get_cumulative_args (cum_v);
 
@@ -4472,7 +4472,7 @@ static bool
 ix86_return_in_memory (const_tree type, const_tree fntype ATTRIBUTE_UNUSED)
 {
   if (TARGET_KNC && ix86_knc_gather_type_p (fntype)) return false;
-  if (TARGET_KNC && !ix86_knc_check_abi_type (type, TYPE_MODE (type)))
+  if (TARGET_KNC && !ix86_knc_check_abi_result (type, fntype))
     return true;
   const machine_mode mode = type_natural_mode (type, NULL, true);
   HOST_WIDE_INT size;
@@ -4965,7 +4965,7 @@ static tree
 ix86_gimplify_va_arg (tree valist, tree type, gimple_seq *pre_p,
 		      gimple_seq *post_p)
 {
-  if (TARGET_KNC && !ix86_knc_check_abi_type (type, TYPE_MODE (type)))
+  if (TARGET_KNC && !ix86_knc_check_va_arg_type (type))
     return ix86_knc_va_arg_error (type);
   static const int intreg[6] = { 0, 1, 2, 3, 4, 5 };
   tree f_gpr, f_fpr, f_ovf, f_sav;
