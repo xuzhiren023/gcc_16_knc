@@ -25,7 +25,8 @@
 /* The Linux mutex, and the KNC spin hint's cycle count.  */
 
 #include "../mutex.c"
+#include "card.h"
 
-/* The operand of the DELAY in cpu_relax (futex.h).  32 is the count the
-   compiler uses for __builtin_ia32_pause on KNC.  */
-unsigned int gomp_knc_delay = 32;
+/* The operand of the DELAY in cpu_relax (futex.h); GOMP_KNC_DELAY sets it
+   (spincount.h).  */
+unsigned int gomp_knc_delay = GOMP_KNC_DELAY_DEFAULT;

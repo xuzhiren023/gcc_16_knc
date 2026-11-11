@@ -45,6 +45,14 @@
 /* The core clock when /proc/cpuinfo has no "cpu MHz": a 5110P's.  */
 #define GOMP_KNC_MHZ_DEFAULT 1100
 
+/* The default operand of the DELAY in a spin iteration (mutex.c,
+   GOMP_KNC_DELAY), in cycles.  */
+#define GOMP_KNC_DELAY_DEFAULT 32
+
+/* How long a waiting thread spins by default before it sleeps, in msec
+   (spincount.h); GOMP_SPINCOUNT and OMP_WAIT_POLICY override it.  */
+#define GOMP_KNC_SPIN_MSEC 3
+
 /* The cores the barrier groups count when the card's topology cannot be
    read: a 7120's 61 without the OS core.  */
 #define GOMP_KNC_NCORES_DEFAULT 60
@@ -286,13 +294,13 @@ gomp_knc_spincount (unsigned int msec, unsigned int mhz, unsigned int delay)
   return count ? count : 1;
 }
 
-/* The default spin count: 3 msec (spincount.h); 103125 at 1100 MHz and the
-   default delay of 32.  */
+/* The default spin count: GOMP_KNC_SPIN_MSEC at MHZ in DELAY periods
+   (spincount.h).  */
 
 static inline unsigned long long
 gomp_knc_default_spincount (unsigned int mhz, unsigned int delay)
 {
-  return gomp_knc_spincount (3, mhz, delay);
+  return gomp_knc_spincount (GOMP_KNC_SPIN_MSEC, mhz, delay);
 }
 
 /* A KNC card numbers its logical CPUs so that the four hardware threads of
