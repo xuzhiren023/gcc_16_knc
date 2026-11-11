@@ -59,6 +59,13 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
    explicit until that separate runtime is provided by this port.  */
 #undef TARGET_PROVIDES_LIBATOMIC
 
+/* S10-03, ADR-0014 point 3: loops under -march=knc call libknc_vmath (the
+   -mveclibabi=knc default), so every link names its static archive after
+   the user's objects and libraries (-lm among them), where an installed
+   one is found; only the members a program calls are linked.  */
+#undef LIB_SPEC
+#define LIB_SPEC "%:if-exists(libknc_vmath.a%s) " GNU_USER_TARGET_LIB_SPEC
+
 /* g++ names one of these implicit linker scripts before -lstdc++ (cp/g++spec.cc).
    libstdc++ installs them on k1om (config/abi/post/k1om-linux-gnu); they fail
    a link whose -lstdc++ found an older library, such as the card's GCC 5 one.  */
@@ -76,7 +83,9 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
 /* S8-16: -mphinix is -O3 plus the measured -march=knc defaults written
    out (docs/gcc-knc-flags.md), expanded here so -### shows it and cc1 never
    sees the driver-only switches.  Each part yields to the user's own
-   setting of that option; no fast-math part (ADR-0003, ADR-0009 point 7).
+   setting of that option; no fast-math part (ADR-0003, ADR-0009 point 7)
+   but -fno-math-errno (S10-03, ADR-0014 point 2), which lets loops call
+   libknc_vmath: results stay IEEE, only errno is not set.
    knc-driver.cc draws the banner and the progress bar on a terminal.
    S9-13: -mknc-card=MODEL sets the card model's prefetch distances, each
    yielding to an explicit --param; knc_card_spec resolves native and card
@@ -90,7 +99,8 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
   "%{!fprefetch-loop-arrays:%{!fno-prefetch-loop-arrays:-fprefetch-loop-arrays}} " \
   "%{!munroll-only-small-loops:%{!mno-unroll-only-small-loops:" \
   "%{!funroll-loops:%{!fno-unroll-loops:-munroll-only-small-loops}}}} " \
-  "%{!malign-data=*:-malign-data=cacheline}} " \
+  "%{!malign-data=*:-malign-data=cacheline} " \
+  "%{!fmath-errno:%{!fno-math-errno:-fno-math-errno}}} " \
   "%:knc-driver(%{mphinix:phinix} %{mno-phinix-banner:nobanner} " \
   "%{mprogress:progress} %{mno-progress:noprogress} %{E:E} %{S:S} " \
   "%{fsyntax-only:S} %{c:c} %{save-temps*:temps} %{o*}) " \
