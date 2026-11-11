@@ -1060,11 +1060,10 @@ ix86_knc_option_override (struct gcc_options *opts)
    length is a whole-loop mask, not an x87 loop, so partial vectors for
    the epilogue and for loops the vectorizer knows to be shorter than one
    vector (usage 1); the masked epilogue itself is still requested from
-   finish_cost.  Alignment peeling keeps the generic default (ADR-0009
-   point 5: aligned masks when alignment is known or peeled); C6 measured
-   lengths 1-33 only, and the vectorizer's own cost model #2 already
-   refuses a peel when a known trip count is below the vector length plus
-   the peel.  A user setting wins, as with the generic default.  */
+   finish_cost.  Alignment peeling was left at the generic default here
+   (cost model #2 refuses a peel only for a known trip count below the
+   vector length plus the peel); S8-22 below turns it off.  A user setting
+   wins, as with the generic default.  */
 void
 ix86_knc_vectorizer_params (struct gcc_options *opts,
 			    struct gcc_options *opts_set)
@@ -1113,6 +1112,21 @@ ix86_knc_vectorizer_params (struct gcc_options *opts,
 	opts->x_flag_vect_cost_model = VECT_COST_MODEL_CHEAP;
       SET_OPTION_IF_UNSET (opts, opts_set, flag_version_loops_for_strides, 1);
     }
+
+  /* S8-22: two -O3 transforms that -O2 lacks put x87 code on KNC hot paths
+     (-mphinix, M2 on the card: mat16 12.9x and short 1.27x slower than
+     -O2).  Complete unrolling before the vectorizer (cunrolli) may grow
+     code at -O3; it flattened a 16-step inner loop, which lost the -O2
+     outer-loop vector form, and the 16 invariants of the flattened row
+     loop go x87, stack, broadcast.  The late cunroll still unrolls after
+     vectorization.  Alignment peeling under the dynamic model compares
+     only in-loop costs, while its prologue is up to VF - 1 x87 iterations
+     (15 for float); the threshold then sends a short call to the x87
+     loop.  Misaligned accesses keep the unpack and pack pairs, and the
+     known-aligned ones (S8-14) stay aligned.  A user setting wins.  */
+  SET_OPTION_IF_UNSET (opts, opts_set, param_cunrolli_grow_size, 0);
+  SET_OPTION_IF_UNSET (opts, opts_set, param_vect_max_peeling_for_alignment,
+		       0);
 
   /* S8-08 (E5-12): -mtune=knc starts functions on a 64-byte line.
      In A/A pairs on the card (one assembly linked twice, the second copy

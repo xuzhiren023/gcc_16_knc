@@ -1783,7 +1783,9 @@ pass_complete_unrolli::execute (function *fun)
   if (number_of_loops (fun) > 1)
     {
       scev_initialize ();
-      ret = tree_unroll_loops_completely (optimize >= 3, false, true);
+      ret = tree_unroll_loops_completely (optimize >= 3
+					  && param_cunrolli_grow_size,
+					  false, true);
       scev_finalize ();
     }
   loop_optimizer_finalize ();
