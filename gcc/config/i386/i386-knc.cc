@@ -1965,6 +1965,9 @@ ix86_knc_expand_reduc (enum rtx_code code, rtx dest, rtx src, bool number_p)
   emit_move_insn (dest, gen_lowpart (GET_MODE (dest), src));
 }
 
+static void knc_expand_div_df (rtx *, bool);
+static void knc_expand_sqrt_df (rtx *, bool);
+
 /* Correct rounding of V16SF sqrt: docs/research/knc-div-sqrt.md sections
    2.3, 2.5 and 5 (E3), Intel 327364-001 pp.588-590 (estimate bound).
 
@@ -1987,8 +1990,14 @@ ix86_knc_expand_reduc (enum rtx_code code, rtx dest, rtx src, bool number_p)
    fixup preserves signed zero, +inf and quieted NaN payloads.  There is
    no branch, helper call, hidden spill or implicit precision change.  */
 void
-ix86_knc_expand_sqrt (rtx *operands)
+ix86_knc_expand_sqrt (rtx *operands, bool conditional)
 {
+  if (GET_MODE (operands[0]) == V8DFmode)
+    {
+      knc_expand_sqrt_df (operands, conditional);
+      return;
+    }
+  gcc_assert (!conditional);
   rtx x = force_reg (V16SFmode, operands[1]);
   rtx m = gen_reg_rtx (V16SFmode);
   rtx e = gen_reg_rtx (V16SFmode);
@@ -2041,7 +2050,10 @@ ix86_knc_expand_sqrt (rtx *operands)
 
 /* Instruction counts, not measured latency.  Constants and transfers are
    costed separately.  Scalar SF sqrt uses x87; the vector sequence has
-   19 instructions for sixteen elements (research section 2.5).  */
+   19 instructions for sixteen elements (research section 2.5), and
+   KNC_SQRT_DF_INSNS for eight doubles (S10-09, knc_expand_sqrt_df).  */
+#define KNC_SQRT_DF_INSNS 31
+#define KNC_DIV_DF_INSNS 34
 bool
 ix86_knc_sqrt_rtx_cost (rtx x, machine_mode mode, int *total)
 {
@@ -2066,9 +2078,9 @@ ix86_knc_sqrt_rtx_cost (rtx x, machine_mode mode, int *total)
 	       + pairs * COSTS_N_INSNS (2);
       return true;
     }
-  if (GET_CODE (x) != SQRT || mode != V16SFmode)
+  if (GET_CODE (x) != SQRT || (mode != V16SFmode && mode != V8DFmode))
     return false;
-  *total = COSTS_N_INSNS (19);
+  *total = COSTS_N_INSNS (mode == V8DFmode ? KNC_SQRT_DF_INSNS : 19);
   return true;
 }
 
@@ -2076,7 +2088,7 @@ bool
 ix86_knc_sqrt_stmt_p (int kind, stmt_vec_info stmt, tree vectype)
 {
   if ((kind != vector_stmt && kind != scalar_stmt) || !stmt || !vectype
-      || TYPE_MODE (vectype) != V16SFmode)
+      || (TYPE_MODE (vectype) != V16SFmode && TYPE_MODE (vectype) != V8DFmode))
     return false;
   switch (gimple_call_combined_fn (stmt->stmt))
     {
@@ -2091,7 +2103,10 @@ ix86_knc_sqrt_stmt_p (int kind, stmt_vec_info stmt, tree vectype)
 unsigned
 ix86_knc_sqrt_stmt_cost (tree vectype)
 {
-  return VECTOR_TYPE_P (vectype) ? 19 * ix86_cost->sse_op : ix86_cost->fsqrt;
+  if (!VECTOR_TYPE_P (vectype))
+    return ix86_cost->fsqrt;
+  return ((TYPE_MODE (vectype) == V8DFmode ? KNC_SQRT_DF_INSNS : 19)
+	  * ix86_cost->sse_op);
 }
 
 /* Small RTL constructors shared by the two division paths.  Each operation
@@ -2152,6 +2167,11 @@ knc_div_blend (rtx k, rtx a, rtx b)
 void
 ix86_knc_expand_div (rtx *operands, bool conditional)
 {
+  if (GET_MODE (operands[0]) == V8DFmode)
+    {
+      knc_expand_div_df (operands, conditional);
+      return;
+    }
   rtx a = force_reg (V16SFmode, operands[conditional ? 2 : 1]);
   rtx b = force_reg (V16SFmode, operands[conditional ? 3 : 2]);
   rtx active = conditional ? operands[1] : force_reg (HImode, constm1_rtx);
@@ -2269,11 +2289,360 @@ ix86_knc_expand_div (rtx *operands, bool conditional)
   emit_move_insn (operands[0], knc_div_blend (active, result, otherwise));
 }
 
+/* S10-09: V8DF division and square root, docs/research/knc-div-sqrt.md
+   section 3; host model tests/regress/knc-v8df-model.c (each instruction
+   one MPFR operation, every estimate within one ulp).  The estimate is the
+   FP32 one on the significand narrowed in RN: |m*y0 - 1| < 2^-22.5.  k1om
+   has no vscalepd and no 64-bit integer add, so a normal result takes its
+   exponent by a dword add to the high halves.
+
+   Division.  With e0 = 1 - mb*y0 and p = e0 + e0^2 + e0^3, y1 = y0 + y0*p
+   has relative error below e0^4 + 2^-74 < 2^-73, so it is faithful and
+   e1 = 1 - mb*y1 is exact (Lemma A on 1/mb).  y2 = y1 + e1*y1 is then
+   RN(1/mb) by Markstein's reciprocal theorem, except for the all-ones
+   significand, where RN(1/mb) = 1/2 + 2^-53 is blended in; so
+   |mb*y2 - 1| <= B*2^-106 < 1/(B+1).  From q0 on, Lemmas A, M and B (above)
+   hold at any precision: q1 is faithful, r1 exact, and fma(r1,y2,q1) is
+   the correctly rounded significand quotient in the dynamic mode, inexact
+   iff a/b is.  The model checks each claim on 200,064 divisors and the
+   whole sequence on every operand pair at 8 to 11 bits, on the 128-bit
+   modular near-midpoint pairs, the Markstein class, exponents and
+   specials, in four modes; without the blend the all-ones divisor fails.
+
+   The quotient exponent k is in [-2097,2097].  For -1021 <= k <= 1023 the
+   result is normal and the exponent add is exact.  Any other active lane
+   takes the rare path.  Special lanes: a regular operand becomes signed
+   one, the divisor its reciprocal class (0 <-> inf by one XOR, NaN kept),
+   and one vmulpd gives the IEEE result and flags; a masked vrcp23ps of
+   zero adds #Z for finite/0.  Range lanes: qm * 2^h is exact and
+   (qm * 2^h) * 2^(k-h) rounds once in the dynamic mode, with vmulpd's
+   overflow and underflow.  As for FP32 (section 2.4), a tiny exact
+   scaling of an inexact quotient raises underflow by a masked product,
+   and under RN a subnormal tie is resolved by the sign of the exact
+   residual ma - mb*qm.  The tie is found without integer shifts:
+   RZ (2*res - 2*t1*s2) is nonzero only when the scaled quotient was
+   exactly half a subnormal step from res.
+
+   Square root.  s = y0*y0 is exact (48 bits), eps = 1 - m*s,
+   p = eps*(1/2 + eps*(3/8 + eps*5/16)) truncates (1-eps)^-1/2 - 1 below
+   2^-89.  g0 + eg = m*y0 exactly, so g1 = RN(g0 + g0*p + eg) is within
+   u/2 + sqrt(m)*2^-73 of r = sqrt(m): faithful.  (The code keeps -eg and
+   the negated sum, which RN mirrors exactly.)  h1 = hy + hy*p is 1/(2r)
+   to 2^-53 relative.  Section 3.2's open obligation, the final step
+   g2 = g1 + d*h1 with d = RN(m - g1^2) inexact: write t = r - g1,
+   |t| <= u/2 + r*2^-73.  The exact m - g1^2 is t*(2r - t), so the exact
+   step gives r - t^2/(2r), and the roundings of d and h1 add at most
+   |t|*2^-52.  In units of the least distance of r from a midpoint
+   (2^-107/r for m in [1,2), 2^-109/r for m in [1/2,1)) that is below
+   1 + 8 = 9 units, for any estimate.  r is n units from a midpoint
+   (4n from a double) exactly when m*2^BITS = G^2 + n has an integer root
+   G, n = 7 mod 8, so the model enumerates by Hensel lifting every reduced
+   argument within 2^16 units and runs it with every estimate in four
+   modes.  One fails, under RN: m = 1 - 2^-53, one unit below the midpoint
+   1 - 2^-54.  There RN(r) = m, and with g1 = m blended in, d = m*2^-53 is
+   exact and the step is correct in every mode.  Every other argument is
+   more than 2^16 units from a boundary, so g2 is the correctly rounded
+   root with the right inexact flag, and the sequence of 3.2 is kept.
+
+   sqrt(x) of a positive double is normal: the exponent add is exact and
+   there is no rare path.  Negative lanes raise invalid by a masked
+   inf - inf; the masked fixup gives signed zero, +inf and quiet NaNs.
+   Every unmasked instruction suppresses flags; masked ones see only the
+   lanes they must.  The mask compares are {sae}, so an inactive or
+   special signalling NaN raises nothing there.  */
+
+/* A V8DI register with BITS in every lane, as mode MODE.  */
+static rtx
+knc_df_bits (machine_mode mode, unsigned HOST_WIDE_INT bits)
+{
+  rtx c = gen_const_vec_duplicate (V8DImode, gen_int_mode (bits, DImode));
+  return gen_lowpart (mode, force_reg (V8DImode, c));
+}
+
+static rtx
+knc_df_const (unsigned HOST_WIDE_INT bits)
+{
+  return knc_df_bits (V8DFmode, bits);
+}
+
+/* The integer N in every lane.  */
+static rtx
+knc_df_int (HOST_WIDE_INT n)
+{
+  REAL_VALUE_TYPE r;
+  real_from_integer (&r, DFmode, n, SIGNED);
+  rtx c = const_double_from_real_value (r, DFmode);
+  return force_reg (V8DFmode, gen_const_vec_duplicate (V8DFmode, c));
+}
+
+/* The lanes of MASK where A PRED B, PRED being IMCI's 3-bit predicate
+   (0 eq, 1 lt, 2 le, 3 unord, 4 neq); no flag is raised.  */
+static rtx
+knc_df_cmp (int pred, rtx a, rtx b, rtx mask)
+{
+  rtx k = gen_reg_rtx (QImode);
+  emit_insn (gen_knc_div_cmp_df (k, a, b, GEN_INT (pred), mask));
+  return k;
+}
+
+/* The FP32 estimate of 1/M, or of 1/sqrt (M), widened exactly.  Lanes
+   8-15 of the narrowed M are zero; {sae} keeps their infinity quiet.  */
+static rtx
+knc_df_estimate (rtx m, bool rsqrt)
+{
+  rtx ms = gen_reg_rtx (V16SFmode), ys = gen_reg_rtx (V16SFmode);
+  rtx ops[2] = { gen_reg_rtx (V8DFmode), ys };
+  emit_insn (gen_knc_div_narrow_df (ms, m));
+  emit_insn (rsqrt ? gen_knc_sqrt_rsqrt (ys, ms) : gen_knc_div_rcp (ys, ms));
+  ix86_knc_expand_unpack (FLOAT_EXTEND, ops, false);
+  return ops[0];
+}
+
+/* The int32 lanes 0-7 of KI moved to the high dword of each qword, over
+   a zero low dword: lanes 8-15 of KI are zero.  */
+static rtx
+knc_df_high_dwords (rtx ki)
+{
+  unsigned char d[16];
+  for (unsigned int i = 0; i < 16; ++i)
+    d[i] = i & 1 ? i >> 1 : 8;
+  rtx kq = gen_reg_rtx (V16SImode);
+  emit_insn (gen_knc_permvar (V16SImode, kq, ki, knc_perm_index (d)));
+  return kq;
+}
+
+/* KQ << 20: exponent fields from knc_df_high_dwords.  */
+static rtx
+knc_df_exponent (rtx kq)
+{
+  rtx ke = gen_reg_rtx (V16SImode);
+  emit_insn (gen_knc_div_ashl_imm (ke, kq, GEN_INT (20)));
+  return ke;
+}
+
+static void
+knc_expand_div_df (rtx *operands, bool conditional)
+{
+  const machine_mode mode = V8DFmode;
+  rtx a = force_reg (mode, operands[conditional ? 2 : 1]);
+  rtx b = force_reg (mode, operands[conditional ? 3 : 2]);
+  rtx active = conditional ? operands[1] : force_reg (QImode, constm1_rtx);
+  rtx zero = force_reg (mode, CONST0_RTX (mode));
+  rtx one = knc_df_const (HOST_WIDE_INT_UC (0x3ff0000000000000));
+  rtx ma = gen_reg_rtx (mode), mb = gen_reg_rtx (mode);
+  rtx ea = gen_reg_rtx (mode), eb = gen_reg_rtx (mode);
+  rtx kf = gen_reg_rtx (mode);
+  emit_insn (gen_knc_div_mant_df (ma, a, GEN_INT (0)));
+  emit_insn (gen_knc_div_mant_df (mb, b, GEN_INT (4)));
+  emit_insn (gen_knc_sqrt_exp_df (ea, a));
+  emit_insn (gen_knc_sqrt_exp_df (eb, b));
+  /* Exact; infinite or NaN when an operand is zero, infinite or NaN.  */
+  emit_insn (gen_knc_div_sub_df (kf, ea, eb));
+  rtx fast = knc_df_cmp (2, knc_df_int (-1021), kf, active);
+  fast = knc_df_cmp (2, kf, knc_df_int (1023), fast);
+  rtx ki = gen_reg_rtx (V16SImode);
+  emit_insn (gen_knc_sqrt_cvt_df (ki, kf));
+  rtx kq = knc_df_high_dwords (ki);
+  rtx ke = knc_df_exponent (kq);
+  rtx sign = knc_df_bits (V16SImode, HOST_WIDE_INT_UC (0x8000000000000000));
+  rtx bi = gen_lowpart (V16SImode, b);
+  rtx sb = knc_div_bin (AND, bi, sign);
+  ma = gen_lowpart (mode, knc_div_bin (XOR, gen_lowpart (V16SImode, ma), sb));
+
+  rtx y0 = knc_df_estimate (mb, false);
+  rtx e0 = gen_reg_rtx (mode), tt = gen_reg_rtx (mode);
+  rtx pp = gen_reg_rtx (mode), y1 = gen_reg_rtx (mode);
+  rtx e1 = gen_reg_rtx (mode), y2 = gen_reg_rtx (mode);
+  rtx q0 = gen_reg_rtx (mode), r0 = gen_reg_rtx (mode);
+  rtx q1 = gen_reg_rtx (mode), r1 = gen_reg_rtx (mode);
+  rtx qm = gen_reg_rtx (mode);
+  emit_insn (gen_knc_sqrt_fnma_df (e0, mb, y0, one));
+  emit_insn (gen_knc_sqrt_fma_df (tt, e0, e0, e0));
+  emit_insn (gen_knc_sqrt_fma_df (pp, tt, e0, e0));
+  emit_insn (gen_knc_sqrt_fma_df (y1, y0, pp, y0));
+  emit_insn (gen_knc_sqrt_fnma_df (e1, mb, y1, one));
+  emit_insn (gen_knc_sqrt_fma_df (y2, e1, y1, y1));
+  rtx all1 = knc_df_cmp (0, mb,
+			 knc_df_const (HOST_WIDE_INT_UC (0x3fffffffffffffff)),
+			 active);
+  y2 = knc_div_blend (all1,
+		      knc_df_const (HOST_WIDE_INT_UC (0x3fe0000000000001)), y2);
+  emit_insn (gen_knc_sqrt_mul_df (q0, ma, y2));
+  emit_insn (gen_knc_sqrt_fnma_df (r0, mb, q0, ma));
+  emit_insn (gen_knc_sqrt_fma_df (q1, r0, y2, q0));
+  emit_insn (gen_knc_sqrt_fnma_df (r1, mb, q1, ma));
+  /* The only flag of the fast path: inexact, in the lanes that finish
+     here.  The other lanes keep q1.  */
+  emit_insn (gen_knc_fmav8df_mask (qm, r1, y2, q1, fast));
+  rtx result = gen_reg_rtx (mode);
+  emit_insn (gen_addv16si3 (gen_lowpart (V16SImode, result),
+			    gen_lowpart (V16SImode, qm), ke));
+  rtx_code_label *done = gen_label_rtx ();
+  /* FAST is a subset of ACTIVE.  A QI mask is tested in a GPR: bits 15:8
+     of its register are undefined.  */
+  emit_cmp_and_jump_insns (fast, conditional ? active : constm1_rtx, EQ,
+			   NULL_RTX, QImode, 1, done,
+			   profile_probability::very_likely ());
+
+  rtx rest = knc_div_bin (XOR, active, fast);
+  rtx t = gen_reg_rtx (mode);
+  emit_insn (gen_knc_div_sub_df (t, kf, kf));
+  rtx special = knc_df_cmp (4, t, zero, rest);
+  rtx range = knc_df_cmp (0, t, zero, rest);
+
+  /* Special lanes.  ea - ea is zero for a finite nonzero a.  */
+  rtx ta = gen_reg_rtx (mode), tb = gen_reg_rtx (mode);
+  emit_insn (gen_knc_div_sub_df (ta, ea, ea));
+  emit_insn (gen_knc_div_sub_df (tb, eb, eb));
+  rtx afin = knc_df_cmp (0, ta, zero, special);
+  rtx bfin = knc_df_cmp (0, tb, zero, special);
+  rtx bnan = knc_df_cmp (3, b, b, special);
+  rtx onei = gen_lowpart (V16SImode, one);
+  rtx ai = gen_lowpart (V16SImode, a);
+  rtx aone = knc_div_bin (IOR, knc_div_bin (AND, ai, sign), onei);
+  rtx bone = knc_div_bin (IOR, sb, onei);
+  rtx inf = knc_df_bits (V16SImode, HOST_WIDE_INT_UC (0x7ff0000000000000));
+  rtx ap = knc_div_blend (afin, gen_lowpart (mode, aone), a);
+  rtx rp = gen_lowpart (mode, knc_div_bin (XOR, bi, inf));
+  rp = knc_div_blend (bfin, gen_lowpart (mode, bone), rp);
+  rp = knc_div_blend (bnan, b, rp);
+  emit_insn (gen_rtx_SET (result,
+			  gen_rtx_VEC_MERGE (mode, gen_rtx_MULT (mode, ap, rp),
+					     result, special)));
+  /* #Z for a finite nonzero numerator over zero.  The estimate has
+     sixteen lanes, so the mask is extended with zeros.  */
+  rtx bz = convert_to_mode (HImode, knc_df_cmp (0, b, zero, afin), 1);
+  rtx zero16 = force_reg (V16SFmode, CONST0_RTX (V16SFmode));
+  emit_insn (gen_knc_div_rcp_flags (gen_reg_rtx (V16SFmode), zero16, zero16,
+				    bz));
+
+  /* Range lanes: the significand quotient, then two scalings by powers
+     of two, of which only the second can round.  */
+  emit_insn (gen_knc_fmav8df_mask (qm, r1, y2, qm, range));
+  rtx kc = gen_reg_rtx (V16SImode), h = gen_reg_rtx (V16SImode);
+  emit_insn (gen_knc_div_clamp_smax
+	     (kc, kq, knc_df_bits (V16SImode,
+				   HOST_WIDE_INT_UC (0xfffffbb400000000))));
+  emit_insn (gen_knc_div_clamp_smin
+	     (kc, kc, knc_df_bits (V16SImode, HOST_WIDE_INT_UC (1100) << 32)));
+  emit_insn (gen_knc_sqrt_shift (h, kc));
+  rtx bias = knc_df_bits (V16SImode, HOST_WIDE_INT_UC (1023) << 32);
+  rtx s1 = knc_df_exponent (knc_div_bin (PLUS, h, bias));
+  rtx s2 = knc_df_exponent (knc_div_bin (PLUS, knc_div_bin (MINUS, kc, h),
+					 bias));
+  s1 = gen_lowpart (mode, s1);
+  s2 = gen_lowpart (mode, s2);
+  rtx t1 = gen_reg_rtx (mode), rr = gen_reg_rtx (mode);
+  emit_insn (gen_knc_sqrt_mul_df (t1, qm, s1));
+  emit_insn (gen_rtx_SET (result,
+			  gen_rtx_VEC_MERGE (mode, gen_rtx_MULT (mode, t1, s2),
+					     result, range)));
+  emit_insn (gen_knc_sqrt_fnma_df (rr, mb, qm, ma));
+  rtx nonexact = knc_df_cmp (4, rr, zero, range);
+  rtx absres
+    = knc_div_bin (AND, gen_lowpart (V16SImode, result),
+		   knc_df_bits (V16SImode,
+				HOST_WIDE_INT_UC (0x7fffffffffffffff)));
+  rtx dblmin = knc_df_const (HOST_WIDE_INT_UC (0x0010000000000000));
+  rtx underflow = knc_df_cmp (1, gen_lowpart (mode, absres), dblmin, nonexact);
+  emit_insn (gen_knc_div_underflow_df
+	     (gen_reg_rtx (mode), dblmin,
+	      knc_df_const (HOST_WIDE_INT_UC (0x3fefffffffffffff)), underflow));
+  rtx csr_mem = assign_stack_temp (SImode, 4);
+  emit_insn (gen_knc_div_mxcsr (csr_mem));
+  rtx csr = force_reg (SImode, csr_mem);
+  rtx rc = knc_div_bin (AND, csr, GEN_INT (0x6000));
+  emit_cmp_and_jump_insns (rc, const0_rtx, NE, NULL_RTX, SImode, true, done);
+  /* k < 0 keeps an overflowed lane out: its difference is not zero.  */
+  rtx low = knc_df_cmp (1, kf, zero, range);
+  rtx two = knc_df_const (HOST_WIDE_INT_UC (0x4000000000000000));
+  rtx t2 = gen_reg_rtx (mode), res2 = gen_reg_rtx (mode);
+  rtx w = gen_reg_rtx (mode);
+  emit_insn (gen_knc_sqrt_mul_df (t2, t1, two));
+  emit_insn (gen_knc_sqrt_mul_df (res2, result, two));
+  emit_insn (gen_knc_div_fnma_rz_df (w, t2, s2, res2));
+  rtx tie = knc_df_cmp (4, w, zero, low);
+  rtx up = knc_df_cmp (1, zero, rr, tie);
+  rtx down = knc_df_cmp (1, rr, zero, tie);
+  emit_insn (gen_knc_div_mul_ru_df (result, t1, s2, result, up));
+  emit_insn (gen_knc_div_mul_rd_df (result, t1, s2, result, down));
+  emit_label (done);
+  if (conditional)
+    result = knc_div_blend (active, result, force_reg (mode, operands[4]));
+  emit_move_insn (operands[0], result);
+}
+
+static void
+knc_expand_sqrt_df (rtx *operands, bool conditional)
+{
+  const machine_mode mode = V8DFmode;
+  rtx x = force_reg (mode, operands[conditional ? 2 : 1]);
+  rtx active = conditional ? operands[1] : force_reg (QImode, constm1_rtx);
+  rtx zero = force_reg (mode, CONST0_RTX (mode));
+  rtx inf = knc_df_const (HOST_WIDE_INT_UC (0x7ff0000000000000));
+  rtx m = gen_reg_rtx (mode), e = gen_reg_rtx (mode);
+  rtx ei = gen_reg_rtx (V16SImode), j = gen_reg_rtx (V16SImode);
+  /* x = m * 2^(2j), 1/2 <= m < 2, j = ceil (e/2).  */
+  emit_insn (gen_knc_div_mant_df (m, x, GEN_INT (5)));
+  emit_insn (gen_knc_sqrt_exp_df (e, x));
+  emit_insn (gen_knc_sqrt_cvt_df (ei, e));
+  emit_insn (gen_addv16si3 (ei, ei,
+			    force_reg (V16SImode, CONST1_RTX (V16SImode))));
+  emit_insn (gen_knc_sqrt_shift (j, ei));
+  rtx je = knc_df_exponent (knc_df_high_dwords (j));
+  /* 0 < x < inf, and x < 0 (-inf included, -0 and NaN not).  */
+  rtx kreg = knc_df_cmp (1, zero, x, active);
+  kreg = knc_df_cmp (1, x, inf, kreg);
+  rtx kneg = knc_df_cmp (1, x, zero, active);
+
+  rtx one = knc_df_const (HOST_WIDE_INT_UC (0x3ff0000000000000));
+  rtx half = knc_df_const (HOST_WIDE_INT_UC (0x3fe0000000000000));
+  rtx c38 = knc_df_const (HOST_WIDE_INT_UC (0x3fd8000000000000));
+  rtx c516 = knc_df_const (HOST_WIDE_INT_UC (0x3fd4000000000000));
+  rtx y0 = knc_df_estimate (m, true);
+  rtx ss = gen_reg_rtx (mode), eps = gen_reg_rtx (mode);
+  rtx p1 = gen_reg_rtx (mode), p2 = gen_reg_rtx (mode);
+  rtx pp = gen_reg_rtx (mode), g0 = gen_reg_rtx (mode);
+  rtx eg = gen_reg_rtx (mode), tt = gen_reg_rtx (mode);
+  rtx g1 = gen_reg_rtx (mode), hy = gen_reg_rtx (mode);
+  rtx h1 = gen_reg_rtx (mode), d = gen_reg_rtx (mode);
+  rtx g2 = gen_reg_rtx (mode);
+  emit_insn (gen_knc_sqrt_mul_df (ss, y0, y0));
+  emit_insn (gen_knc_sqrt_fnma_df (eps, m, ss, one));
+  emit_insn (gen_knc_sqrt_fma_df (p1, eps, c516, c38));
+  emit_insn (gen_knc_sqrt_fma_df (p2, eps, p1, half));
+  emit_insn (gen_knc_sqrt_mul_df (pp, eps, p2));
+  emit_insn (gen_knc_sqrt_mul_df (g0, m, y0));
+  /* eg = g0 - m*y0 and tt = eg - g0*pp are the negated product error and
+     correction, so g1 = g0 - tt.  */
+  emit_insn (gen_knc_sqrt_fnma_df (eg, m, y0, g0));
+  emit_insn (gen_knc_sqrt_fnma_df (tt, g0, pp, eg));
+  emit_insn (gen_knc_div_sub_df (g1, g0, tt));
+  rtx all1 = knc_df_cmp (0, m,
+			 knc_df_const (HOST_WIDE_INT_UC (0x3fefffffffffffff)),
+			 active);
+  g1 = knc_div_blend (all1, m, g1);
+  emit_insn (gen_knc_sqrt_mul_df (hy, y0, half));
+  emit_insn (gen_knc_sqrt_fma_df (h1, hy, pp, hy));
+  emit_insn (gen_knc_sqrt_fnma_df (d, g1, g1, m));
+  emit_insn (gen_knc_fmav8df_mask (g2, d, h1, g1, kreg));
+  rtx result = gen_reg_rtx (mode);
+  emit_insn (gen_addv16si3 (gen_lowpart (V16SImode, result),
+			    gen_lowpart (V16SImode, g2), je));
+  emit_insn (gen_knc_sqrt_invalid_df (result, result, inf, kneg));
+  rtx table = force_reg (V8DImode,
+			 gen_const_vec_duplicate (V8DImode, GEN_INT (0x206ad)));
+  emit_insn (gen_knc_sqrt_fixup_df (result, result, x, table, active));
+  if (conditional)
+    result = knc_div_blend (active, result, force_reg (mode, operands[3]));
+  emit_move_insn (operands[0], result);
+}
+
 int
-ix86_knc_division_cost (const struct processor_costs *cost)
+ix86_knc_division_cost (const struct processor_costs *cost, machine_mode mode)
 {
   /* Fast path count; constants and transfers have their own RTL costs. */
-  return 27 * cost->sse_op;
+  return (mode == V8DFmode ? KNC_DIV_DF_INSNS : 27) * cost->sse_op;
 }
 
 /* IMCI widens only lanes 0-7 (Intel 327364-001 pp.154, 184, 187).
