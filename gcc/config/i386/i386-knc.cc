@@ -1158,7 +1158,9 @@ ix86_knc_vectorizer_params (struct gcc_options *opts,
 /* S10-03, ADR-0014 point 2: the -mveclibabi=knc handler, the default under
    -march=knc.  Return a declaration of libknc_vmath's by-value entry point
    __knc_vmath_<name>_<lanes> for FN on 16 floats or 8 doubles (the v0 set:
-   exp, log and pow), or NULL_TREE.  Its 64-byte vector arguments and result
+   exp, log and pow; S10-07's v1a set: sin, cos, tan, log10, atan2, sinh,
+   cosh and tanh, and atan on floats only, as the library has no 8-lane
+   atan), or NULL_TREE.  Its 64-byte vector arguments and result
    travel in zmm (ADR-0014 point 1).  The library rounds to nearest within
    about 1 ulp and keeps the IEEE special values, so unlike SVML it needs no
    fast-math flag; it never sets errno, and the vectorizer only asks once
@@ -1182,11 +1184,24 @@ ix86_knc_veclibabi (combined_fn fn, tree type_out, tree type_in)
   switch (fn)
     {
     CASE_CFN_POW:
+    CASE_CFN_ATAN2:
       binary = true;
+      break;
+
+    CASE_CFN_ATAN:
+      if (el_mode != SFmode)
+	return NULL_TREE;
       break;
 
     CASE_CFN_EXP:
     CASE_CFN_LOG:
+    CASE_CFN_SIN:
+    CASE_CFN_COS:
+    CASE_CFN_TAN:
+    CASE_CFN_LOG10:
+    CASE_CFN_SINH:
+    CASE_CFN_COSH:
+    CASE_CFN_TANH:
       break;
 
     default:
