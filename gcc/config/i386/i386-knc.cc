@@ -53,6 +53,9 @@ along with GCC; see the file COPYING3.  If not see
 #include "predict.h"
 #include "tree-vectorizer.h"
 #include "i386-builtins.h"
+#include "i386-options.h"
+#include "builtins.h"
+#include "stringpool.h"
 
 /* S6-03 docs/research/knc-characterization.md, measured 2026-11-06.
    Cost units below are per-core cycles (COSTS_N_INSNS), or twice cycles
@@ -1145,6 +1148,72 @@ ix86_knc_vectorizer_params (struct gcc_options *opts,
   if (knc && opts->x_flag_align_functions
       && !opts_set->x_str_align_functions)
     opts->x_str_align_functions = knc->align_func;
+
+  /* S10-03 (ADR-0014 point 2): loops call libknc_vmath unless the user
+     chose another vector library.  */
+  if (!opts_set->x_ix86_veclibabi_type)
+    ix86_veclib_handler = &ix86_knc_veclibabi;
+}
+
+/* S10-03, ADR-0014 point 2: the -mveclibabi=knc handler, the default under
+   -march=knc.  Return a declaration of libknc_vmath's by-value entry point
+   __knc_vmath_<name>_<lanes> for FN on 16 floats or 8 doubles (the v0 set:
+   exp, log and pow), or NULL_TREE.  Its 64-byte vector arguments and result
+   travel in zmm (ADR-0014 point 1).  The library rounds to nearest within
+   about 1 ulp and keeps the IEEE special values, so unlike SVML it needs no
+   fast-math flag; it never sets errno, and the vectorizer only asks once
+   -fno-math-errno has made the scalar call const.  Not under
+   -frounding-math: other rounding modes are not qualified.  */
+tree
+ix86_knc_veclibabi (combined_fn fn, tree type_out, tree type_in)
+{
+  if (!TARGET_KNC || flag_rounding_math)
+    return NULL_TREE;
+
+  machine_mode el_mode = TYPE_MODE (TREE_TYPE (type_out));
+  int n = TYPE_VECTOR_SUBPARTS (type_out);
+  int in_n = TYPE_VECTOR_SUBPARTS (type_in);
+  if (el_mode != TYPE_MODE (TREE_TYPE (type_in))
+      || n != in_n
+      || !((el_mode == SFmode && n == 16) || (el_mode == DFmode && n == 8)))
+    return NULL_TREE;
+
+  bool binary = false;
+  switch (fn)
+    {
+    CASE_CFN_POW:
+      binary = true;
+      break;
+
+    CASE_CFN_EXP:
+    CASE_CFN_LOG:
+      break;
+
+    default:
+      return NULL_TREE;
+    }
+
+  tree fndecl = mathfn_built_in (el_mode == DFmode
+				 ? double_type_node : float_type_node, fn);
+  if (!fndecl)
+    return NULL_TREE;
+
+  /* The name after "__builtin_": expf, log, ...  */
+  char name[32];
+  snprintf (name, sizeof name, "__knc_vmath_%s_%d",
+	    IDENTIFIER_POINTER (DECL_NAME (fndecl)) + 10, n);
+
+  tree fntype = (binary
+		 ? build_function_type_list (type_out, type_in, type_in, NULL)
+		 : build_function_type_list (type_out, type_in, NULL));
+  tree new_fndecl = build_decl (BUILTINS_LOCATION, FUNCTION_DECL,
+				get_identifier (name), fntype);
+  TREE_PUBLIC (new_fndecl) = 1;
+  DECL_EXTERNAL (new_fndecl) = 1;
+  DECL_IS_NOVOPS (new_fndecl) = 1;
+  TREE_READONLY (new_fndecl) = 1;
+
+  return new_fndecl;
 }
 
 /* S8-10 (E5-16): a remote line crosses the ring, so data that other cores
