@@ -1424,3 +1424,7 @@ KNC only: tune for a card model: generic (default), 3100, 5100, 7100, a card nam
 mprogress
 Target Driver Condition({defined (KNC_DRIVER_OPTIONS)})
 KNC only: draw a progress bar, one step per driver job, on a terminal (default with -mphinix).
+
+Wknc-unsafe-cbrtl
+Target Var(warn_knc_unsafe_cbrtl) Init(1) Warning
+Warn when KNC replaces an unsafe MPSS long double cube root call.

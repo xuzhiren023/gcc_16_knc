@@ -56,6 +56,80 @@ along with GCC; see the file COPYING3.  If not see
 #include "i386-options.h"
 #include "builtins.h"
 #include "stringpool.h"
+#include "tree-pass.h"
+#include "input.h"
+
+/* Before inlining, recognize both the C entry and the standard C++ overload.
+   Replacing the latter here keeps -O0 safe and diagnoses each user's call,
+   rather than the shared implementation in a system header.  */
+static bool
+knc_cbrtl_decl_p (tree decl)
+{
+  if (!decl || !DECL_NAME (decl))
+    return false;
+  tree type = TREE_TYPE (decl);
+  tree args = TYPE_ARG_TYPES (type);
+  if (TREE_TYPE (type) != long_double_type_node || !args
+      || TREE_VALUE (args) != long_double_type_node
+      || !TREE_CHAIN (args) || TREE_VALUE (TREE_CHAIN (args)) != void_type_node)
+    return false;
+  if (fndecl_built_in_p (decl, BUILT_IN_CBRTL))
+    return true;
+  const char *name = IDENTIFIER_POINTER (DECL_NAME (decl));
+  if (!strcmp (name, "cbrtl") && DECL_EXTERNAL (decl)
+      && !strcmp (IDENTIFIER_POINTER (DECL_ASSEMBLER_NAME (decl)), "cbrtl"))
+    return true;
+  tree context = DECL_CONTEXT (decl);
+  return !strcmp (name, "cbrt") && DECL_IN_SYSTEM_HEADER (decl)
+    && context && TREE_CODE (context) == NAMESPACE_DECL
+    && DECL_NAME (context)
+    && !strcmp (IDENTIFIER_POINTER (DECL_NAME (context)), "std");
+}
+
+namespace {
+const pass_data pass_data_knc_cbrtl =
+{
+  GIMPLE_PASS, "knccbrtl", OPTGROUP_NONE, TV_NONE, PROP_cfg, 0, 0, 0, 0
+};
+
+class pass_knc_cbrtl : public gimple_opt_pass
+{
+public:
+  pass_knc_cbrtl (gcc::context *ctxt)
+    : gimple_opt_pass (pass_data_knc_cbrtl, ctxt) {}
+  bool gate (function *) final override { return TARGET_KNC; }
+  unsigned int execute (function *fun) final override
+  {
+    tree replacement = NULL_TREE;
+    basic_block bb;
+    FOR_EACH_BB_FN (bb, fun)
+      for (gimple_stmt_iterator it = gsi_start_bb (bb); !gsi_end_p (it);
+	   gsi_next (&it))
+	{
+	  gimple *stmt = gsi_stmt (it);
+	  if (!is_gimple_call (stmt)
+	      || !knc_cbrtl_decl_p (gimple_call_fndecl (stmt)))
+	    continue;
+	  location_t loc = linemap_resolve_location
+	    (line_table, gimple_location (stmt), LRK_MACRO_EXPANSION_POINT, NULL);
+	  warning_at (loc, OPT_Wknc_unsafe_cbrtl,
+		      "MPSS %<cbrtl%> is unsafe on KNC; using replacement %<__knc_cbrtl%>");
+	  if (!replacement)
+	    replacement = build_fn_decl
+	      ("__knc_cbrtl", build_function_type_list
+	       (long_double_type_node, long_double_type_node, NULL_TREE));
+	  gimple_call_set_fndecl (as_a<gcall *> (stmt), replacement);
+	}
+    return 0;
+  }
+};
+}
+
+gimple_opt_pass *
+make_pass_knc_cbrtl (gcc::context *ctxt)
+{
+  return new pass_knc_cbrtl (ctxt);
+}
 
 /* S6-03 docs/research/knc-characterization.md, measured 2026-11-06.
    Cost units below are per-core cycles (COSTS_N_INSNS), or twice cycles

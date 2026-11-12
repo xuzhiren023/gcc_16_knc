@@ -24,6 +24,7 @@ along with GCC; see the file COPYING3.  If not see
    REPLACE_PASS (PASS, INSTANCE, TGT_PASS)
  */
 
+  INSERT_PASS_AFTER (pass_build_cfg, 1, pass_knc_cbrtl);
   INSERT_PASS_AFTER (pass_postreload_cse, 1, pass_insert_vzeroupper);
   INSERT_PASS_AFTER (pass_late_combine, 1, pass_stv, false /* timode_p */);
   /* Run the 64-bit STV pass before the CSE pass so that CONST0_RTX and

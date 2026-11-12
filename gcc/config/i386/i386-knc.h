@@ -120,4 +120,7 @@ extern void ix86_knc_align_thread_local (tree);
 extern bool ix86_knc_expand_storent (rtx *);
 extern tree ix86_knc_storent_fence_decl (void);
 
+class gimple_opt_pass;
+extern gimple_opt_pass *make_pass_knc_cbrtl (gcc::context *);
+
 #endif /* GCC_I386_KNC_H */
