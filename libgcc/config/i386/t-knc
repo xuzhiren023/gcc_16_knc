@@ -10,6 +10,7 @@ LIB2FUNCS_EXCLUDE += _mulhc3 _divhc3
 softfp_extras += addsf3 divsf3 eqsf2 gesf2 lesf2 mulsf3 negsf2 subsf3 \
 		 unordsf2 fixsfsi floatsisf floatunsisf
 LIB2ADD += $(srcdir)/config/i386/knc-cpuinfo.c
+LIB2ADD += $(srcdir)/config/i386/knc-cbrtl.c
 
 # The 64-bit map preserves frame-registration versions, TF defaults and
 # the supported _BitInt exports.  Map entries alone do not select HF/BF
