@@ -97,6 +97,13 @@
   [(V8DF "TARGET_AVX512F || TARGET_KNC") V4DF])
 (define_mode_iterator VF2_KNC
   [(V8DF "TARGET_AVX512F || TARGET_KNC") (V4DF "TARGET_AVX") V2DF])
+;; S10-09: expander-only copy of sse.md's VF2HB for sqrt<mode>2.
+(define_mode_iterator VF2HB_KNC
+  [(V32BF "TARGET_AVX10_2") (V16BF "TARGET_AVX10_2")
+   (V8BF "TARGET_AVX10_2") (V32HF "TARGET_AVX512FP16")
+   (V16HF "TARGET_AVX512FP16 && TARGET_AVX512VL")
+   (V8HF "TARGET_AVX512FP16 && TARGET_AVX512VL")
+   (V8DF "TARGET_AVX512F || TARGET_KNC") (V4DF "TARGET_AVX") V2DF])
 
 (define_insn "*knc_vec_unpacks_lo_v16sf"
   [(set (match_operand:V8DF 0 "register_operand" "=YJ")
@@ -1912,6 +1919,8 @@
    UNSPEC_KNC_SQRT_RSQRT UNSPEC_KNC_SQRT_MUL UNSPEC_KNC_SQRT_FMA
    UNSPEC_KNC_SQRT_FNMA UNSPEC_KNC_SQRT_SCALE UNSPEC_KNC_SQRT_FIXUP])
 (define_c_enum "unspecv" [UNSPECV_KNC_SQRT_INVALID])
+;; S10-09: the V8DF forms of the same instructions are named *_df.
+(define_mode_attr knc_df [(V16SF "") (V8DF "_df")])
 
 (define_insn "knc_sqrt_mant"
   [(set (match_operand:V16SF 0 "register_operand" "=YJ")
@@ -1921,13 +1930,13 @@
   "vgetmantps\t{%{sae%}, $5, %g1, %g0|%g0, %g1, 5, %{sae%}}"
   [(set_attr "type" "sse") (set_attr "mode" "V16SF")])
 
-(define_insn "knc_sqrt_exp"
-  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
-        (unspec:V16SF [(match_operand:V16SF 1 "register_operand" "YJ")]
+(define_insn "knc_sqrt_exp<knc_df>"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
+        (unspec:KNC_FP [(match_operand:KNC_FP 1 "register_operand" "YJ")]
                        UNSPEC_KNC_SQRT_EXP))]
   "TARGET_KNC"
-  "vgetexpps\t{%{sae%}, %g1, %g0|%g0, %g1, %{sae%}}"
-  [(set_attr "type" "sse") (set_attr "mode" "V16SF")])
+  "vgetexp<knc_fp_suffix>\t{%{sae%}, %g1, %g0|%g0, %g1, %{sae%}}"
+  [(set_attr "type" "sse") (set_attr "mode" "<MODE>")])
 
 (define_insn "knc_sqrt_cvt"
   [(set (match_operand:V16SI 0 "register_operand" "=YJ")
@@ -1945,34 +1954,34 @@
   "vrsqrt23ps\t{%{sae%}, %g1, %g0|%g0, %g1, %{sae%}}"
   [(set_attr "type" "sse") (set_attr "mode" "V16SF")])
 
-(define_insn "knc_sqrt_mul"
-  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
-        (unspec:V16SF [(match_operand:V16SF 1 "register_operand" "YJ")
-                       (match_operand:V16SF 2 "register_operand" "YJ")]
+(define_insn "knc_sqrt_mul<knc_df>"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
+        (unspec:KNC_FP [(match_operand:KNC_FP 1 "register_operand" "YJ")
+                       (match_operand:KNC_FP 2 "register_operand" "YJ")]
                       UNSPEC_KNC_SQRT_MUL))]
   "TARGET_KNC"
-  "vmulps\t{%{rn-sae%}, %g2, %g1, %g0|%g0, %g1, %g2, %{rn-sae%}}"
-  [(set_attr "type" "ssemul") (set_attr "mode" "V16SF")])
+  "vmul<knc_fp_suffix>\t{%{rn-sae%}, %g2, %g1, %g0|%g0, %g1, %g2, %{rn-sae%}}"
+  [(set_attr "type" "ssemul") (set_attr "mode" "<MODE>")])
 
-(define_insn "knc_sqrt_fma"
-  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
-        (unspec:V16SF [(match_operand:V16SF 1 "register_operand" "YJ")
-                       (match_operand:V16SF 2 "register_operand" "YJ")
-                       (match_operand:V16SF 3 "register_operand" "0")]
+(define_insn "knc_sqrt_fma<knc_df>"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
+        (unspec:KNC_FP [(match_operand:KNC_FP 1 "register_operand" "YJ")
+                       (match_operand:KNC_FP 2 "register_operand" "YJ")
+                       (match_operand:KNC_FP 3 "register_operand" "0")]
                       UNSPEC_KNC_SQRT_FMA))]
   "TARGET_KNC"
-  "vfmadd231ps\t{%{rn-sae%}, %g2, %g1, %g0|%g0, %g1, %g2, %{rn-sae%}}"
-  [(set_attr "type" "ssemuladd") (set_attr "mode" "V16SF")])
+  "vfmadd231<knc_fp_suffix>\t{%{rn-sae%}, %g2, %g1, %g0|%g0, %g1, %g2, %{rn-sae%}}"
+  [(set_attr "type" "ssemuladd") (set_attr "mode" "<MODE>")])
 
-(define_insn "knc_sqrt_fnma"
-  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
-        (unspec:V16SF [(match_operand:V16SF 1 "register_operand" "YJ")
-                       (match_operand:V16SF 2 "register_operand" "YJ")
-                       (match_operand:V16SF 3 "register_operand" "0")]
+(define_insn "knc_sqrt_fnma<knc_df>"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
+        (unspec:KNC_FP [(match_operand:KNC_FP 1 "register_operand" "YJ")
+                       (match_operand:KNC_FP 2 "register_operand" "YJ")
+                       (match_operand:KNC_FP 3 "register_operand" "0")]
                       UNSPEC_KNC_SQRT_FNMA))]
   "TARGET_KNC"
-  "vfnmadd231ps\t{%{rn-sae%}, %g2, %g1, %g0|%g0, %g1, %g2, %{rn-sae%}}"
-  [(set_attr "type" "ssemuladd") (set_attr "mode" "V16SF")])
+  "vfnmadd231<knc_fp_suffix>\t{%{rn-sae%}, %g2, %g1, %g0|%g0, %g1, %g2, %{rn-sae%}}"
+  [(set_attr "type" "ssemuladd") (set_attr "mode" "<MODE>")])
 
 (define_insn "knc_sqrt_scale"
   [(set (match_operand:V16SF 0 "register_operand" "=YJ")
@@ -2017,27 +2026,28 @@
   "vpsrad\t{$1, %g1, %g0|%g0, %g1, 1}"
   [(set_attr "type" "sseishft") (set_attr "mode" "XI")])
 
-;; S5-11: FP32 division, research/knc-div-sqrt.md section 2.
-;; Expander-only VFH copy; FP64 division remains unavailable on KNC.
+;; S5-11: FP32 division, research/knc-div-sqrt.md section 2; S10-09: FP64,
+;; section 3.  Expander-only VFH copy.
 (define_mode_iterator VFH_KNC_DIV
   [(V32HF "TARGET_AVX512FP16")
    (V16HF "TARGET_AVX512FP16 && TARGET_AVX512VL")
    (V8HF "TARGET_AVX512FP16 && TARGET_AVX512VL")
    (V16SF "TARGET_AVX512F || TARGET_KNC") (V8SF "TARGET_AVX") V4SF
-   (V8DF "TARGET_AVX512F") (V4DF "TARGET_AVX") (V2DF "TARGET_SSE2")])
+   (V8DF "TARGET_AVX512F || TARGET_KNC") (V4DF "TARGET_AVX")
+   (V2DF "TARGET_SSE2")])
 (define_c_enum "unspec"
   [UNSPEC_KNC_DIV_MANT UNSPEC_KNC_DIV_RCP UNSPEC_KNC_DIV_SUB
    UNSPEC_KNC_DIV_SCALE_RU UNSPEC_KNC_DIV_SCALE_RD])
 (define_c_enum "unspecv" [UNSPECV_KNC_DIV_FLAGS UNSPECV_KNC_DIV_UNDERFLOW UNSPECV_KNC_DIV_MXCSR])
 
-(define_insn "knc_div_mant"
-  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
-        (unspec:V16SF [(match_operand:V16SF 1 "register_operand" "YJ")
+(define_insn "knc_div_mant<knc_df>"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
+        (unspec:KNC_FP [(match_operand:KNC_FP 1 "register_operand" "YJ")
                        (match_operand:SI 2 "const_int_operand")]
                       UNSPEC_KNC_DIV_MANT))]
   "TARGET_KNC"
-  "vgetmantps\t{%{sae%}, %2, %g1, %g0|%g0, %g1, %2, %{sae%}}"
-  [(set_attr "type" "sse") (set_attr "mode" "V16SF")])
+  "vgetmant<knc_fp_suffix>\t{%{sae%}, %2, %g1, %g0|%g0, %g1, %2, %{sae%}}"
+  [(set_attr "type" "sse") (set_attr "mode" "<MODE>")])
 
 (define_insn "knc_div_rcp"
   [(set (match_operand:V16SF 0 "register_operand" "=YJ")
@@ -2048,14 +2058,14 @@
   [(set_attr "knc_special" "reciprocal")
    (set_attr "type" "sse") (set_attr "mode" "V16SF")])
 
-(define_insn "knc_div_sub"
-  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
-        (unspec:V16SF [(match_operand:V16SF 1 "register_operand" "YJ")
-                       (match_operand:V16SF 2 "register_operand" "YJ")]
+(define_insn "knc_div_sub<knc_df>"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
+        (unspec:KNC_FP [(match_operand:KNC_FP 1 "register_operand" "YJ")
+                       (match_operand:KNC_FP 2 "register_operand" "YJ")]
                       UNSPEC_KNC_DIV_SUB))]
   "TARGET_KNC"
-  "vsubps\t{%{rn-sae%}, %g2, %g1, %g0|%g0, %g1, %g2, %{rn-sae%}}"
-  [(set_attr "type" "sseadd") (set_attr "mode" "V16SF")])
+  "vsub<knc_fp_suffix>\t{%{rn-sae%}, %g2, %g1, %g0|%g0, %g1, %g2, %{rn-sae%}}"
+  [(set_attr "type" "sseadd") (set_attr "mode" "<MODE>")])
 
 ;; The masked reciprocal also raises #Z with an unused result.  Keeping
 ;; this one instruction volatile prevents deletion of that flag update.
@@ -2071,16 +2081,16 @@
   [(set_attr "knc_special" "reciprocal")
    (set_attr "type" "sse") (set_attr "mode" "V16SF")])
 
-(define_insn "knc_div_underflow"
-  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
-        (unspec_volatile:V16SF
-          [(match_operand:V16SF 1 "register_operand" "0")
-           (match_operand:V16SF 2 "register_operand" "YJ")
-           (match_operand:HI 3 "register_operand" "YL")]
+(define_insn "knc_div_underflow<knc_df>"
+  [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
+        (unspec_volatile:KNC_FP
+          [(match_operand:KNC_FP 1 "register_operand" "0")
+           (match_operand:KNC_FP 2 "register_operand" "YJ")
+           (match_operand:<knc_maskmode> 3 "register_operand" "YL")]
           UNSPECV_KNC_DIV_UNDERFLOW))]
   "TARGET_KNC"
-  "vmulps\t{%g2, %g1, %g0%{%3%}|%g0%{%3%}, %g1, %g2}"
-  [(set_attr "type" "ssemul") (set_attr "mode" "V16SF")])
+  "vmul<knc_fp_suffix>\t{%g2, %g1, %g0%{%3%}|%g0%{%3%}, %g1, %g2}"
+  [(set_attr "type" "ssemul") (set_attr "mode" "<MODE>")])
 
 (define_insn "knc_div_mxcsr"
   [(set (match_operand:SI 0 "memory_operand" "=m")
@@ -2128,6 +2138,166 @@
   "TARGET_KNC"
   "vpsrlvd\t{%g2, %g1, %g0|%g0, %g1, %g2}"
   [(set_attr "type" "sseishft") (set_attr "mode" "XI")])
+
+;; S10-09: FP64 division and square root, research/knc-div-sqrt.md
+;; section 3 (Intel 327364-001: VCVTPD2PS, VCVTFXPNTPD2DQ, VCMPPD, VPSLLD,
+;; VPMAXSD, VPMINSD, VFIXUPNANPD; k1om has no vscalepd or 64-bit integer
+;; add, so the exponent is added to the high dwords).  Each is one register
+;; instruction, used only by ix86_knc_expand_div and ix86_knc_expand_sqrt.
+(define_c_enum "unspec"
+  [UNSPEC_KNC_DIV_NARROW UNSPEC_KNC_DIV_CMP UNSPEC_KNC_DIV_FNMA_RZ])
+
+;; Lanes 8-15 of the result are zero.
+(define_insn "knc_sqrt_cvt_df"
+  [(set (match_operand:V16SI 0 "register_operand" "=YJ")
+        (unspec:V16SI [(match_operand:V8DF 1 "register_operand" "YJ")]
+                      UNSPEC_KNC_SQRT_CVT))]
+  "TARGET_KNC"
+  "vcvtfxpntpd2dq\t{%{sae%}, $0, %g1, %g0|%g0, %g1, 0, %{sae%}}"
+  [(set_attr "knc_special" "convert_df")
+   (set_attr "type" "ssecvt") (set_attr "mode" "XI")])
+
+;; The significand narrowed to FP32 for vrcp23ps and vrsqrt23ps.
+(define_insn "knc_div_narrow_df"
+  [(set (match_operand:V16SF 0 "register_operand" "=YJ")
+        (unspec:V16SF [(match_operand:V8DF 1 "register_operand" "YJ")]
+                      UNSPEC_KNC_DIV_NARROW))]
+  "TARGET_KNC"
+  "vcvtpd2ps\t{%{rn-sae%}, %g1, %g0|%g0, %g1, %{rn-sae%}}"
+  [(set_attr "knc_special" "convert_df")
+   (set_attr "type" "ssecvt") (set_attr "mode" "XI")])
+
+;; Operand 0 is the lanes of mask operand 4 where the 3-bit predicate
+;; operand 3 holds; {sae}, so no operand raises a flag, a signalling NaN
+;; included.  Bits 15:8 of the result are zero.
+(define_insn "knc_div_cmp_df"
+  [(set (match_operand:QI 0 "register_operand" "=YK")
+        (unspec:QI [(match_operand:V8DF 1 "register_operand" "YJ")
+                    (match_operand:V8DF 2 "register_operand" "YJ")
+                    (match_operand:SI 3 "const_0_to_7_operand")
+                    (match_operand:QI 4 "register_operand" "YL")]
+                   UNSPEC_KNC_DIV_CMP))]
+  "TARGET_KNC"
+  "vcmppd\t{%{sae%}, %3, %g2, %g1, %0%{%4%}|%0%{%4%}, %g1, %g2, %3, %{sae%}}"
+  [(set_attr "type" "ssecmp")
+   (set_attr "length_immediate" "1")
+   (set_attr "mode" "XI")])
+
+;; The same over all eight lanes.
+(define_insn "knc_div_cmp_all_df"
+  [(set (match_operand:QI 0 "register_operand" "=YK")
+        (unspec:QI [(match_operand:V8DF 1 "register_operand" "YJ")
+                    (match_operand:V8DF 2 "register_operand" "YJ")
+                    (match_operand:SI 3 "const_0_to_7_operand")]
+                   UNSPEC_KNC_DIV_CMP))]
+  "TARGET_KNC"
+  "vcmppd\t{%{sae%}, %3, %g2, %g1, %0|%0, %g1, %g2, %3, %{sae%}}"
+  [(set_attr "type" "ssecmp")
+   (set_attr "length_immediate" "1")
+   (set_attr "mode" "XI")])
+
+;; Operand 3 - operand 1 * operand 2, rounded toward zero.
+(define_insn "knc_div_fnma_rz_df"
+  [(set (match_operand:V8DF 0 "register_operand" "=YJ")
+        (unspec:V8DF [(match_operand:V8DF 1 "register_operand" "YJ")
+                      (match_operand:V8DF 2 "register_operand" "YJ")
+                      (match_operand:V8DF 3 "register_operand" "0")]
+                     UNSPEC_KNC_DIV_FNMA_RZ))]
+  "TARGET_KNC"
+  "vfnmadd231pd\t{%{rz-sae%}, %g2, %g1, %g0|%g0, %g1, %g2, %{rz-sae%}}"
+  [(set_attr "type" "ssemuladd") (set_attr "mode" "V8DF")])
+
+(define_insn "knc_div_mul_ru_df"
+  [(set (match_operand:V8DF 0 "register_operand" "=YJ")
+        (vec_merge:V8DF
+          (unspec:V8DF [(match_operand:V8DF 1 "register_operand" "YJ")
+                        (match_operand:V8DF 2 "register_operand" "YJ")]
+                       UNSPEC_KNC_DIV_SCALE_RU)
+          (match_operand:V8DF 3 "register_operand" "0")
+          (match_operand:QI 4 "register_operand" "YL")))]
+  "TARGET_KNC"
+  "vmulpd\t{%{ru-sae%}, %g2, %g1, %g0%{%4%}|%g0%{%4%}, %g1, %g2, %{ru-sae%}}"
+  [(set_attr "type" "ssemul") (set_attr "mode" "V8DF")])
+
+(define_insn "knc_div_mul_rd_df"
+  [(set (match_operand:V8DF 0 "register_operand" "=YJ")
+        (vec_merge:V8DF
+          (unspec:V8DF [(match_operand:V8DF 1 "register_operand" "YJ")
+                        (match_operand:V8DF 2 "register_operand" "YJ")]
+                       UNSPEC_KNC_DIV_SCALE_RD)
+          (match_operand:V8DF 3 "register_operand" "0")
+          (match_operand:QI 4 "register_operand" "YL")))]
+  "TARGET_KNC"
+  "vmulpd\t{%{rd-sae%}, %g2, %g1, %g0%{%4%}|%g0%{%4%}, %g1, %g2, %{rd-sae%}}"
+  [(set_attr "type" "ssemul") (set_attr "mode" "V8DF")])
+
+;; Private immediate shift and clamps for the exponent paths, as
+;; knc_sqrt_shift.
+(define_insn "knc_div_ashl_imm"
+  [(set (match_operand:V16SI 0 "register_operand" "=YJ")
+        (ashift:V16SI (match_operand:V16SI 1 "register_operand" "YJ")
+                      (match_operand:SI 2 "const_0_to_31_operand")))]
+  "TARGET_KNC"
+  "vpslld\t{%2, %g1, %g0|%g0, %g1, %2}"
+  [(set_attr "type" "sseishft")
+   (set_attr "length_immediate" "1")
+   (set_attr "mode" "XI")])
+
+(define_insn "knc_div_clamp_<code>"
+  [(set (match_operand:V16SI 0 "register_operand" "=YJ")
+        (smaxmin:V16SI (match_operand:V16SI 1 "register_operand" "YJ")
+                       (match_operand:V16SI 2 "register_operand" "YJ")))]
+  "TARGET_KNC"
+  "vp<knc_maxmin>sd\t{%g2, %g1, %g0|%g0, %g1, %g2}"
+  [(set_attr "type" "sseiadd") (set_attr "mode" "XI")])
+
+;; Volatile: inf - inf in the lanes of operand 3 must raise invalid.  The
+;; lanes it writes are the ones knc_sqrt_fixup_df replaces.
+(define_insn "knc_sqrt_invalid_df"
+  [(set (match_operand:V8DF 0 "register_operand" "=YJ")
+        (unspec_volatile:V8DF
+          [(match_operand:V8DF 1 "register_operand" "0")
+           (match_operand:V8DF 2 "register_operand" "YJ")
+           (match_operand:QI 3 "register_operand" "YL")]
+          UNSPECV_KNC_SQRT_INVALID))]
+  "TARGET_KNC"
+  "vsubpd\t{%g2, %g2, %g0%{%3%}|%g0%{%3%}, %g2, %g2}"
+  [(set_attr "type" "sseadd") (set_attr "mode" "V8DF")])
+
+(define_insn "knc_sqrt_fixup_all_df"
+  [(set (match_operand:V8DF 0 "register_operand" "=YJ")
+        (unspec:V8DF [(match_operand:V8DF 1 "register_operand" "0")
+                      (match_operand:V8DF 2 "register_operand" "YJ")
+                      (match_operand:V8DI 3 "register_operand" "YJ")]
+                     UNSPEC_KNC_SQRT_FIXUP))]
+  "TARGET_KNC"
+  "vfixupnanpd\t{%g3, %g2, %g0|%g0, %g2, %g3}"
+  [(set_attr "type" "sse") (set_attr "mode" "V8DF")])
+
+;; Masked, so that an inactive signalling NaN of cond_sqrt raises nothing.
+(define_insn "knc_sqrt_fixup_df"
+  [(set (match_operand:V8DF 0 "register_operand" "=YJ")
+        (unspec:V8DF [(match_operand:V8DF 1 "register_operand" "0")
+                      (match_operand:V8DF 2 "register_operand" "YJ")
+                      (match_operand:V8DI 3 "register_operand" "YJ")
+                      (match_operand:QI 4 "register_operand" "YL")]
+                     UNSPEC_KNC_SQRT_FIXUP))]
+  "TARGET_KNC"
+  "vfixupnanpd\t{%g3, %g2, %g0%{%4%}|%g0%{%4%}, %g2, %g3}"
+  [(set_attr "type" "sse") (set_attr "mode" "V8DF")])
+
+;; sse.md has no cond_sqrt.  Without it a loop with a variable bound keeps
+;; an x87 remainder, whose FP64 root is rounded twice.
+(define_expand "cond_sqrtv8df"
+  [(match_operand:V8DF 0 "register_operand")
+   (match_operand:QI 1 "register_operand")
+   (match_operand:V8DF 2 "vector_operand")
+   (match_operand:V8DF 3 "nonimm_or_0_operand")]
+  "TARGET_KNC"
+{
+  ix86_knc_expand_sqrt (operands, true);
+  DONE;
+})
 
 ;; Software prefetch (S8-03, E5-07; Intel 327364-001 pp. 641-656).  Locality
 ;; 3 to 0 selects vprefetch0 (L1), vprefetch1 (L2), vprefetch2 (L2, non-
