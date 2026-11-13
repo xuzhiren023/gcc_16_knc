@@ -1676,14 +1676,40 @@ ix86_knc_secondary_reload (bool in_p, rtx x, reg_class_t rclass,
    eq 0, lt 1, le 2, unord 3, neq 4, nlt 5, nle 6, ord 7) and VPCMPD/VPCMPUD
    (3 and 7 reserved).  FP > and >= swap the operands of lt and le, so they
    signal on a QNaN as C requires.  UNLT..UNGE get here only with
-   -fno-trapping-math (knc_vec_cmp_operator), as nle/nlt; UNEQ and LTGT
-   never do.  The immediates of the integer forms are those of
-   ix86_cmp_code_to_pcmp_immediate.  */
+   -fno-trapping-math (knc_vec_cmp_operator), as nle/nlt; UNEQ never does.
+   LTGT combines signaling lt masks in both operand orders.  Integer
+   immediates follow ix86_cmp_code_to_pcmp_immediate.  */
 bool
 ix86_knc_expand_mask_vec_cmp (rtx dest, enum rtx_code code, rtx op0, rtx op1)
 {
   machine_mode mode = GET_MODE (op0);
   bool fp = FLOAT_MODE_P (mode);
+  if (code == LTGT)
+    {
+      gcc_assert (fp);
+      /* A late GIMPLE fold can introduce LTGT after vectorization has
+	 checked the original comparisons.  Rejecting it in the predicate
+	 then leaves do_store_flag without a vector expansion.
+	 LTGT signals on NaNs, like LT (rtlanal.cc:may_trap_p_1).  Combine
+	 LT in both operand orders: NaNs and equal signed zeros yield false,
+	 and both QNaNs and SNaNs raise invalid.  Keep both compares and the
+	 mask OR visible to the optimizer.  */
+      op0 = force_reg (mode, op0);
+      op1 = force_reg (mode, op1);
+      machine_mode mask_mode = GET_MODE (dest);
+      rtx lt = gen_reg_rtx (mask_mode);
+      rtx gt = gen_reg_rtx (mask_mode);
+      ix86_knc_expand_mask_vec_cmp (lt, LT, op0, op1);
+      ix86_knc_expand_mask_vec_cmp (gt, LT, op1, op0);
+      if (mask_mode == HImode)
+	emit_insn (gen_iorhi3 (dest, lt, gt));
+      else
+	{
+	  gcc_assert (mask_mode == QImode);
+	  emit_insn (gen_iorqi3 (dest, lt, gt));
+	}
+      return true;
+    }
   bool swap = false;
   int imm;
   switch (code)
