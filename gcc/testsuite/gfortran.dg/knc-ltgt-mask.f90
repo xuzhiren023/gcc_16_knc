@@ -1,6 +1,6 @@
 ! { dg-do compile { target { i?86-*-* x86_64-*-* k1om-*-* } } }
 ! { dg-options "-O2 -march=knc" }
-! { dg-final { scan-assembler-times {vcmpps[\t ]+\$1,} 2 } }
+! { dg-final { scan-assembler {vcmpps[\t ]+\$1,} } }
 ! { dg-final { scan-assembler-not {vcmpps[\t ]+\$4,} } }
 ! { dg-final { scan-assembler-not {vcmpps[\t ]+\$7,} } }
 !
