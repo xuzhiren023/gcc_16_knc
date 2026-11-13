@@ -435,26 +435,32 @@
 ;; can still be a pseudo.  A hard-zmm-only condition lets these copies cache
 ;; *movsf_internal or *movdf_internal.  LRA's simple_move_p then skips their
 ;; constraints for a cost-2 move, leaving an SSE-only pattern after allocation.
-;; Keep every same-bank alternative here so the recognized pattern remains
-;; valid for x87, general and zmm registers.  Cross-bank reloads still use the
-;; explicit memory bridge above.
+;; Include x87 and general-register memory alternatives as well: a pseudo
+;; recognized here can be spilled.  A register-only pattern makes LRA reload
+;; that spill through alternating x87 and zmm copies without reaching memory.
+;; Cross-bank reloads still use the explicit memory bridge above.
 (define_mode_iterator KNC_FLOAT_COPY [SF DF])
 (define_mode_attr knc_copy_int_mode [(SF "SI") (DF "DI")])
 (define_mode_attr knc_copy_int_suffix [(SF "l") (DF "q")])
+(define_mode_attr knc_copy_int_isa [(SF "*") (DF "x64")])
 
 (define_insn "*knc_copy<mode>"
-  [(set (match_operand:KNC_FLOAT_COPY 0 "register_operand" "=f,?r,?YJ")
-        (match_operand:KNC_FLOAT_COPY 1 "register_operand" "f,r,YJ"))]
-  "TARGET_KNC"
+  [(set (match_operand:KNC_FLOAT_COPY 0 "nonimmediate_operand"
+          "=f,m,?r,m,?YJ")
+        (match_operand:KNC_FLOAT_COPY 1 "nonimmediate_operand"
+          "fm,f,rm,r,YJ"))]
+  "TARGET_KNC && !(MEM_P (operands[0]) && MEM_P (operands[1]))"
 {
-  if (which_alternative == 0)
+  if (which_alternative < 2)
     return output_387_reg_move (insn, operands);
-  if (which_alternative == 1)
+  if (which_alternative < 4)
     return "mov{<knc_copy_int_suffix>}\t{%1, %0|%0, %1}";
   return "vmovaps\t%g1, %g0";
 }
-  [(set_attr "type" "fmov,imov,ssemov")
-   (set_attr "mode" "<MODE>,<knc_copy_int_mode>,<MODE>")])
+  [(set_attr "isa" "*,*,<knc_copy_int_isa>,<knc_copy_int_isa>,*")
+   (set_attr "type" "fmov,fmov,imov,imov,ssemov")
+   (set_attr "mode"
+     "<MODE>,<MODE>,<knc_copy_int_mode>,<knc_copy_int_mode>,<MODE>")])
 
 (define_mode_iterator KNC_OTHER_COPY [SI DI TI TF])
 (define_insn "*knc_copy<mode>"

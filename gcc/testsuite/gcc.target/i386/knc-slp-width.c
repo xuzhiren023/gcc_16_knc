@@ -1,10 +1,12 @@
 /* { dg-do compile } */
 /* { dg-options "-O2 -march=knc -fopt-info-vec" } */
-/* { dg-bogus "vectorized using ([0-9]|[0-5][0-9]|6[0-35-9]|[7-9][0-9]|[0-9][0-9][0-9]+) byte vectors" "" { target *-*-* } 0 } */
-/* { dg-prune-output "vectorized using 64 byte vectors" } */
+/* { dg-prune-output "vectorized using .* byte vectors" } */
+/* { dg-final { scan-assembler-not "%[xy]mm" } } */
 
-/* S11-23: SLP must not choose a partial vector for adjacent constants.
-   These stores previously reported 16-byte V2DI and 2-byte V2QI groups.  */
+/* S11-23: generic integer-mode SLP fallback is legal on KNC when it lowers
+   to scalar GPR moves.  The 16-byte V2DI and 2-byte V2QI reports for these
+   stores must not introduce SSE or AVX instructions.  tools/check.py's
+   --rrtm selection also assembles and checks this output with knc_lint.  */
 long words[2] __attribute__((aligned(64)));
 unsigned char bytes[2] __attribute__((aligned(64)));
 
