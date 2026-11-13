@@ -1,5 +1,7 @@
 ! { dg-do compile { target { i?86-*-* x86_64-*-* k1om-*-* } } }
 ! { dg-options "-O2 -march=knc" }
+! { dg-final { scan-assembler {vcmpps[\t ]+\$4,} } }
+! { dg-final { scan-assembler {vcmpps[\t ]+\$7,} } }
 !
 ! Equal expressions on ordered branches can become an LTGT vector mask.
 ! NaNs and either signed zero must leave the destination unchanged.
