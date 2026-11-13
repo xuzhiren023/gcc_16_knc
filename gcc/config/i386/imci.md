@@ -285,11 +285,11 @@
               (match_operand:SI 2 "register_operand" "=&r")])]
   "TARGET_KNC"
 {
-  /* The memory-only transfer constraint spills this pseudo through LRA.
+  /* A NO_REGS pseudo makes the bridge memory-only from its creation.
      A fresh assign_stack_temp here would miss the frame elimination offset
      already applied to the surrounding RTL.  LRA's spill path applies the
      full offset and keeps subsequent frame and stack-pointer updates.  */
-  rtx mem = gen_reg_rtx (<MODE>mode);
+  rtx mem = ix86_knc_reload_bridge (<MODE>mode);
   rtx mask = gen_reg_rtx (HImode);
   emit_move_insn (operands[2], GEN_INT (GET_MODE_SIZE (<MODE>mode) > 8 ? 3 : 1));
   emit_insn (gen_knc_mask (mask, gen_lowpart (HImode, operands[2])));
@@ -305,7 +305,7 @@
   "TARGET_KNC"
 {
   /* Let LRA allocate and eliminate the bridge slot, as for reload_out.  */
-  rtx mem = gen_reg_rtx (<MODE>mode);
+  rtx mem = ix86_knc_reload_bridge (<MODE>mode);
   emit_move_insn (mem, operands[1]);
   if (<MODE>mode == TImode || <MODE>mode == TFmode)
     {
@@ -519,7 +519,7 @@
       /* The bridge has the mode's natural alignment, so a one/two-lane
          pack or unpack cannot straddle a 64-byte boundary.  */
       rtx mem = lra_in_progress
-                ? gen_reg_rtx (<MODE>mode)
+                ? ix86_knc_reload_bridge (<MODE>mode)
                 : assign_stack_temp (<MODE>mode, GET_MODE_SIZE (<MODE>mode));
       rtx gpr = gen_reg_rtx (SImode);
       rtx mask = gen_reg_rtx (HImode);
