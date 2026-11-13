@@ -438,6 +438,11 @@
 ;; Include x87 and general-register memory alternatives as well: a pseudo
 ;; recognized here can be spilled.  A register-only pattern makes LRA reload
 ;; that spill through alternating x87 and zmm copies without reaching memory.
+;; Before LRA, leave loads and stores to the ordinary floating move patterns.
+;; Their immediate alternatives let constant-equivalent pseudos be stored
+;; directly.  Capturing those stores here instead forces an x87 or GPR
+;; reload of the constant.  Memory is needed here only once a register copy
+;; has been spilled; keep it valid through postreload as well.
 ;; Cross-bank reloads still use the explicit memory bridge above.
 (define_mode_iterator KNC_FLOAT_COPY [SF DF])
 (define_mode_attr knc_copy_int_mode [(SF "SI") (DF "DI")])
@@ -449,7 +454,10 @@
           "=f,m,?r,m,?YJ")
         (match_operand:KNC_FLOAT_COPY 1 "nonimmediate_operand"
           "fm,f,rm,r,YJ"))]
-  "TARGET_KNC && !(MEM_P (operands[0]) && MEM_P (operands[1]))"
+  "TARGET_KNC && !(MEM_P (operands[0]) && MEM_P (operands[1]))
+   && (lra_in_progress || reload_completed
+       || (register_operand (operands[0], <MODE>mode)
+           && register_operand (operands[1], <MODE>mode)))"
 {
   if (which_alternative < 2)
     return output_387_reg_move (insn, operands);
