@@ -1008,7 +1008,8 @@
 ;; signaling nle/nlt.  match.pd folds ~(a < b) into a u>= b there without
 ;; asking the target (S4-03: cond_add exposed it as an ICE in expand).
 ;; LTGT can also appear after vectorization (S11-25).  Expand it as the
-;; intersection of quiet NE and ORDERED masks; no guarded compare is needed.
+;; union of signaling LT masks in both operand orders, preserving NaN
+;; exceptions.
 ;; Any other target keeps the expander's former "" (any comparison).
 (define_special_predicate "knc_vec_cmp_operator"
   (ior (not (match_test "TARGET_KNC"))

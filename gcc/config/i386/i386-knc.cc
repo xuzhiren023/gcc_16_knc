@@ -1677,8 +1677,8 @@ ix86_knc_secondary_reload (bool in_p, rtx x, reg_class_t rclass,
    (3 and 7 reserved).  FP > and >= swap the operands of lt and le, so they
    signal on a QNaN as C requires.  UNLT..UNGE get here only with
    -fno-trapping-math (knc_vec_cmp_operator), as nle/nlt; UNEQ never does.
-   LTGT combines quiet neq and ord masks.  Integer immediates follow
-   ix86_cmp_code_to_pcmp_immediate.  */
+   LTGT combines signaling lt masks in both operand orders.  Integer
+   immediates follow ix86_cmp_code_to_pcmp_immediate.  */
 bool
 ix86_knc_expand_mask_vec_cmp (rtx dest, enum rtx_code code, rtx op0, rtx op1)
 {
@@ -1690,22 +1690,23 @@ ix86_knc_expand_mask_vec_cmp (rtx dest, enum rtx_code code, rtx op0, rtx op1)
       /* A late GIMPLE fold can introduce LTGT after vectorization has
 	 checked the original comparisons.  Rejecting it in the predicate
 	 then leaves do_store_flag without a vector expansion.
-	 NE alone is true on NaNs; intersect it with ORDERED.  Both compares
-	 are quiet on QNaNs and signal on SNaNs, and NE rejects equal signed
-	 zeros.  Keep both compares and the mask AND visible to the optimizer.  */
+	 LTGT signals on NaNs, like LT (rtlanal.cc:may_trap_p_1).  Combine
+	 LT in both operand orders: NaNs and equal signed zeros yield false,
+	 and both QNaNs and SNaNs raise invalid.  Keep both compares and the
+	 mask OR visible to the optimizer.  */
       op0 = force_reg (mode, op0);
       op1 = force_reg (mode, op1);
       machine_mode mask_mode = GET_MODE (dest);
-      rtx ne = gen_reg_rtx (mask_mode);
-      rtx ordered = gen_reg_rtx (mask_mode);
-      ix86_knc_expand_mask_vec_cmp (ne, NE, op0, op1);
-      ix86_knc_expand_mask_vec_cmp (ordered, ORDERED, op0, op1);
+      rtx lt = gen_reg_rtx (mask_mode);
+      rtx gt = gen_reg_rtx (mask_mode);
+      ix86_knc_expand_mask_vec_cmp (lt, LT, op0, op1);
+      ix86_knc_expand_mask_vec_cmp (gt, LT, op1, op0);
       if (mask_mode == HImode)
-	emit_insn (gen_andhi3 (dest, ne, ordered));
+	emit_insn (gen_iorhi3 (dest, lt, gt));
       else
 	{
 	  gcc_assert (mask_mode == QImode);
-	  emit_insn (gen_andqi3 (dest, ne, ordered));
+	  emit_insn (gen_iorqi3 (dest, lt, gt));
 	}
       return true;
     }
