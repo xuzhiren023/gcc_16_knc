@@ -428,12 +428,18 @@
   [(set_attr "type" "ssemov")
    (set_attr "mode" "<MODE>")])
 
+;; A pair load and a store both have two UNSPEC inputs.  While the bridge
+;; is still a pseudo, their predicates accept the same register-only RTL.
+;; Distinguish the load before constraint processing: otherwise recog picks
+;; knc_store first and LRA reloads the destination into memory recursively.
+(define_c_enum "unspec" [UNSPEC_KNC_LOAD_PAIR])
+
 (define_insn "knc_load_pair<mode>"
   [(set (match_operand:KNC_PAIR 0 "register_operand" "=YJ")
         (unspec:KNC_PAIR
           [(match_operand:KNC_PAIR 1 "nonimmediate_operand" "m")
            (match_operand:HI 2 "register_operand" "YL")]
-          UNSPEC_KNC_TRANSFER))]
+          UNSPEC_KNC_LOAD_PAIR))]
   "TARGET_KNC"
   "vloadunpacklpd\t%1, %g0%{%2%}"
   [(set_attr "type" "ssemov")
