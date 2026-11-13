@@ -439,21 +439,27 @@
 ;; recognized here can be spilled.  A register-only pattern makes LRA reload
 ;; that spill through alternating x87 and zmm copies without reaching memory.
 ;; Before LRA, leave loads and stores to the ordinary floating move patterns.
-;; Their immediate alternatives let constant-equivalent pseudos be stored
-;; directly.  Capturing those stores here instead forces an x87 or GPR
-;; reload of the constant.  Memory is needed here only once a register copy
-;; has been spilled; keep it valid through postreload as well.
+;; LRA can re-recognize those moves here after substituting an equivalent
+;; constant, so retain the scalar immediate alternatives of *movsf_internal
+;; and *movdf_internal too.  SF bits fit an immediate store; DF stores accept
+;; only zero, with other DF constants loaded into a GPR by movabsq.
+;; Keep x87 constant loads when no reload is needed, but do not introduce
+;; an x87-to-zmm bridge for a constant that can use an integer store.
+;; Memory is needed here once a register copy has been spilled; keep it
+;; valid through postreload as well.
 ;; Cross-bank reloads still use the explicit memory bridge above.
 (define_mode_iterator KNC_FLOAT_COPY [SF DF])
 (define_mode_attr knc_copy_int_mode [(SF "SI") (DF "DI")])
 (define_mode_attr knc_copy_int_suffix [(SF "l") (DF "q")])
 (define_mode_attr knc_copy_int_isa [(SF "*") (DF "x64")])
+(define_mode_attr knc_copy_store_constant [(SF "F") (DF "C")])
+(define_mode_attr knc_copy_constant_move [(SF "mov{l}") (DF "movabs{q}")])
 
 (define_insn "*knc_copy<mode>"
   [(set (match_operand:KNC_FLOAT_COPY 0 "nonimmediate_operand"
-          "=f,m,?r,m,?YJ")
-        (match_operand:KNC_FLOAT_COPY 1 "nonimmediate_operand"
-          "fm,f,rm,r,YJ"))]
+          "=f,m,?r,m,?YJ,!f,?r,?r")
+        (match_operand:KNC_FLOAT_COPY 1 "general_operand"
+          "fm,f,rm,r<knc_copy_store_constant>,YJ,G,C,F"))]
   "TARGET_KNC && !(MEM_P (operands[0]) && MEM_P (operands[1]))
    && (lra_in_progress || reload_completed
        || (register_operand (operands[0], <MODE>mode)
@@ -463,12 +469,25 @@
     return output_387_reg_move (insn, operands);
   if (which_alternative < 4)
     return "mov{<knc_copy_int_suffix>}\t{%1, %0|%0, %1}";
-  return "vmovaps\t%g1, %g0";
+  if (which_alternative == 4)
+    return "vmovaps\t%g1, %g0";
+  if (which_alternative == 5)
+    return standard_80387_constant_opcode (operands[1]);
+  if (which_alternative == 6)
+    return "mov{l}\t{%1, %k0|%k0, %1}";
+  return "<knc_copy_constant_move>\t{%1, %0|%0, %1}";
 }
-  [(set_attr "isa" "*,*,<knc_copy_int_isa>,<knc_copy_int_isa>,*")
-   (set_attr "type" "fmov,fmov,imov,imov,ssemov")
+  [(set_attr "isa"
+     "*,*,<knc_copy_int_isa>,<knc_copy_int_isa>,*,*,<knc_copy_int_isa>,<knc_copy_int_isa>")
+   (set_attr "type" "fmov,fmov,imov,imov,ssemov,fmov,imov,imov")
    (set_attr "mode"
-     "<MODE>,<MODE>,<knc_copy_int_mode>,<knc_copy_int_mode>,<MODE>")])
+     "<MODE>,<MODE>,<knc_copy_int_mode>,<knc_copy_int_mode>,<MODE>,<MODE>,SI,<knc_copy_int_mode>")
+   (set (attr "modrm")
+     (if_then_else (eq_attr "alternative" "7")
+       (const_string "0") (const_string "*")))
+   (set (attr "length_immediate")
+     (if_then_else (eq_attr "alternative" "7")
+       (const_string "<MODE_SIZE>") (const_string "*")))])
 
 (define_mode_iterator KNC_OTHER_COPY [SI DI TI TF])
 (define_insn "*knc_copy<mode>"
