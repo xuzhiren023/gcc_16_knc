@@ -24,8 +24,10 @@
 
 /* Reference: donor libgcc/config/i386/crtfastmath.c, __x86_64__ branch.
    KNC supports these MXCSR instructions without enabling the SSE ISA.
-   Set only FTZ (15) and DAZ (6), preserving every other bit, including
-   the exception masks (7-12) and KNC's bits 20 and 21.  */
+   R27 Table 2.15 p.39 (verified early KNC specification): FZ is bit 15,
+   DAZ is bit 6, bits 7-12 and 20 are reserved, and bit 21 is DUE
+   (Disable Unmasked Exceptions).  Set only FZ and DAZ; retain DUE and
+   other controls, and never introduce reserved bits.  */
 static void __attribute__ ((constructor))
 set_fast_math (void)
 {

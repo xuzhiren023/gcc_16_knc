@@ -20,6 +20,10 @@ SHLIB_MAPFILES = libgcc-std.ver $(srcdir)/config/i386/libgcc-glibc.ver
 
 # sfp-exceptions.c's non-SSE branch raises exceptions with x87 operations
 # and fnstenv/fldenv.  No SSE math flags are set for KNC.
+# S12-23 audit: its environment edits only OR exception flags; it does not
+# clear pending exceptions.  The R12 CD28 p.25 recovery requirement
+# (verified production x100 erratum) is handled by the clearing runtime,
+# not by changing this flag-raising path.
 HOST_LIBGCC2_CFLAGS += -mlong-double-80
 
 # Match the donor's 64-bit crtfastmath without enabling SSE builtins.
