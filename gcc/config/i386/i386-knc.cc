@@ -202,9 +202,13 @@ knc_processor_costs (unsigned chains)
     COSTS_N_INSNS (1),       /* CH vaddps/pd.rt.  */
     COSTS_N_INSNS (1), COSTS_N_INSNS (1), /* CH vmulps/pd.rt.  */
     COSTS_N_INSNS (1), COSTS_N_INSNS (1), /* CH vfmadd213ps/pd.rt.  */
-    COSTS_N_INSNS (38), COSTS_N_INSNS (38), /* E: no native vector div;
-                                           scalar fallback; SF hook overrides.  */
-    COSTS_N_INSNS (38), COSTS_N_INSNS (38), /* E: sqrt as above.  */
+    COSTS_N_INSNS (38), COSTS_N_INSNS (38), /* E: vector div fallbacks;
+			      ix86_knc_division_cost specializes SF and DF.
+			      Instruction costs, not expansion latencies.  */
+    COSTS_N_INSNS (38), COSTS_N_INSNS (38), /* E: vector sqrt fallbacks;
+			      SF/DF specialized costs in the vectorizer and
+			      RTL hooks below.  R27 pp.55-56 describes FP
+			      semantics, not a numerical proof of lowering.  */
     COSTS_N_INSNS (1), COSTS_N_INSNS (1), COSTS_N_INSNS (1),
                             /* CH convert_up/down.rt, one memory op.  */
     COSTS_N_INSNS (1), COSTS_N_INSNS (1),
@@ -241,7 +245,8 @@ ix86_knc_tune_cost (const gcc_options *opts, const processor_costs *fallback)
 /* S8-08 (E5-12, ADR-0009 amendment 1 point 6): -mtune=knc starts from the
    generic flags and changes only those with a documented or measured
    reason; docs/research/knc-costs.md lists every flag.  The 0x66 and 0x67
-   prefixes cost 2 decode cycles (SSDG p.16), so promote HImode register
+   prefixes cost 2 decode cycles (R01, SSDG 328207-001EN p.19;
+   R02 p.56), so promote HImode register
    operations to SImode.  S8-19: KNC has no decoded icache, so drop
    pass_align_tight_loops; its unbounded .p2align before a loop entered by
    fallthrough runs nops on every outer trip (m2_mat8 1.105x slower, lead
@@ -1126,6 +1131,11 @@ ix86_knc_target_macros (cpp_reader *reader,
 bool
 ix86_knc_option_override (struct gcc_options *opts)
 {
+  /* Keep the positive near distance strictly below the far distance,
+     including explicit overrides.  L2's option range starts at two.  */
+  if (opts->x_knc_prefetch_l1_distance >= opts->x_knc_prefetch_l2_distance)
+    opts->x_knc_prefetch_l1_distance = opts->x_knc_prefetch_l2_distance - 1;
+
   opts->x_ix86_isa_flags |= OPTION_MASK_ISA_KNC;
   if (opts->x_ix86_isa_flags
       & (OPTION_MASK_ISA_SSE | OPTION_MASK_ISA_MMX
@@ -1163,11 +1173,15 @@ ix86_knc_vectorizer_params (struct gcc_options *opts,
 
   /* S8-03 (E5-07, ADR-0009 point 5): software prefetch carries streaming
      code on KNC, whose L2 hardware prefetcher follows at most 16 streams
-     and stops at a 4 KiB page while the in-order core stalls on every
-     miss.  -march=knc turns -fprefetch-loop-arrays on at -O2 and above
+     and stops at a 4 KiB page.  A load miss suspends the requesting
+     context; other contexts can issue and requests can remain outstanding
+     (R01, SSDG 328207-001EN p.19).
+     -march=knc turns -fprefetch-loop-arrays on at -O2 and above
      (not -Os; a user setting wins).  The pass's instruction ratios drop to
      one: an eight-stream row is two instructions per reference, and C2
-     prices vprefetch0 at nothing and vprefetch1 at about two core cycles.
+     measured no incremental time for vprefetch0 in its paired sequence
+     and about two core cycles for vprefetch1.  This is not a zero resource
+     cost; pairing depends on instruction class and encoding (R02 pp.34,56).
      The distances come from ix86_knc_prefetch_distances.  */
   if (opts->x_flag_prefetch_loop_arrays < 0
       && opts->x_optimize >= 2

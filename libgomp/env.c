@@ -2523,12 +2523,12 @@ initialize_env (void)
 #endif
   if (!parse_spincount ("GOMP_SPINCOUNT", &gomp_spin_count_var))
     {
-      /* Using a rough estimation of 100000 spins per msec,
-	 use 5 min blocking for OMP_WAIT_POLICY=active,
-	 3 msec blocking when OMP_WAIT_POLICY is not specificed
-	 and 0 when OMP_WAIT_POLICY=passive.
-	 Depending on the CPU speed, this can be e.g. 5 times longer
-	 or 5 times shorter.  */
+      /* For generic PAUSE loops, a rough estimate of 100000 spins per
+	 msec gives 5 min for OMP_WAIT_POLICY=active, 3 msec when it is
+	 unspecified and 0 when passive, with substantial CPU variation.
+	 This is not KNC's ACTIVE duration: each iteration includes DELAY
+	 (R27 p.628), default 128 cycles.  At 1238 MHz, 30 billion such
+	 delays alone take about 3102 seconds, before loop overhead.  */
       if (wait_policy > 0)
 	gomp_spin_count_var = 30000000000LL;
       else if (wait_policy < 0)

@@ -1112,13 +1112,16 @@
    (set_attr "mode" "XI")])
 
 ;; S8-13 (E5-08, ADR-0009 point 5 and amendment 1 point 1): the no-read,
-;; non-globally-ordered store for a write-only stream beyond L2 (Intel
-;; 327364-001, VMOVNRNGOAPS/PD, p.355-358; knc-characterization.md C1:
-;; 3.1x over vmovaps at one thread, 2.7x on the whole card).  The line is
-;; written without a read for ownership and may pass other stores, so the
-;; loop prefetch pass, the only path that emits it, follows the loop with
-;; knc_storent_fence.  Integer lines take the ps/pd forms: the bits are the
-;; line.  Bm: only a 64-byte-aligned whole line.
+;; non-globally-ordered store for a write-only stream beyond L2 (R27,
+;; ISA 327364-001, NGO forms pp.393-398; ordered no-read forms pp.388-392).
+;; An eligible full-line store can avoid reading the old line on a cache
+;; miss; benefit depends on misses and lack of near-term reuse.  Historical
+;; C1 observations in knc-characterization.md were 3.1x over vmovaps at one
+;; thread and 2.7x on the whole card for that workload and timing method.
+;; NGO stores may pass other stores, so the loop prefetch pass, the only
+;; path that emits them, follows the loop with knc_storent_fence.  Integer
+;; lines take the ps/pd forms: the bits are the line.  Bm: only a
+;; 64-byte-aligned whole line.
 (define_c_enum "unspec" [UNSPEC_KNC_MOVNT UNSPEC_KNC_STORENT_FENCE])
 (define_mode_attr knc_ngo_suffix
   [(V16SF "ps") (V8DF "pd") (V16SI "ps") (V8DI "pd")])

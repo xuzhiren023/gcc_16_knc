@@ -42,7 +42,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The core clock when /proc/cpuinfo has no "cpu MHz": a 5110P's.  */
+/* Fallback MHz estimate when /proc/cpuinfo has no "cpu MHz".
+   This is not a model clock: R05 p.5 and R21 p.3 give about 1.05 GHz
+   for their 5110P configurations.  */
 #define GOMP_KNC_MHZ_DEFAULT 1100
 
 /* The default operand of the DELAY in a spin iteration (mutex.c,
@@ -120,14 +122,17 @@ struct gomp_knc_arena
   struct gomp_knc_mem in;
 };
 
-/* ADR-0012 point 3: one arena per CPU unless their reservations and the
-   thread stacks do not fit in the budget; then the largest count that fits,
-   but no fewer than GOMP_KNC_ARENA_MIN (or the CPUs, if fewer).  The budget
-   is RLIMIT_AS when finite and CommitLimit under strict overcommit, the
-   smaller of the two when both apply.  With neither, reservations cost no
-   memory and nothing bounds them, so there is one arena per CPU: on the
-   card about 169 arenas ran a malloc-heavy job in 64-67 s against 140-149 s
-   at a cap of 60-64 (measurement 7 in GCC-KNC).  */
+/* One arena per allowed CPU unless reservations and thread stacks do not
+   fit in the budget; then the largest count that fits, but no fewer than
+   GOMP_KNC_ARENA_MIN (or the CPUs, if fewer).  The budget is RLIMIT_AS when
+   finite and CommitLimit under strict overcommit, the smaller when both
+   apply.  With neither, this implementation uses one arena per CPU and
+   ignores MemTotal.  This diverges from ADR-0012 point 3's measured share
+   of MemTotal; the lead must reconcile that policy (S12-14 N09/B18).
+   R24a, new_heap/arena_get2, distinguishes virtual reservations from
+   physical consumption; it does not establish a fastest cap.  Historical
+   measurement 7 in GCC-KNC observed about 169 arenas taking 64-67 s versus
+   140-149 s at a cap of 60-64 for that malloc-heavy job.  */
 
 static inline unsigned long
 gomp_knc_arena_cap (const struct gomp_knc_mem *in, struct gomp_knc_arena *out)
