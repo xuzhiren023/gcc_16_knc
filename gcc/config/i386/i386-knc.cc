@@ -58,6 +58,8 @@ along with GCC; see the file COPYING3.  If not see
 #include "stringpool.h"
 #include "tree-pass.h"
 #include "input.h"
+#include "ira.h"
+#include "lra-int.h"
 
 /* Before inlining, recognize both the C entry and the standard C++ overload.
    Replacing the latter here keeps -O0 safe and diagnoses each user's call,
@@ -1609,6 +1611,19 @@ knc_scalar_transport_mode_p (machine_mode mode)
 {
   return mode == SFmode || mode == DFmode || mode == SImode
          || mode == DImode || mode == TImode || mode == TFmode;
+}
+
+/* A bridge created during LRA must start in memory.  In particular, a TI/TF
+   pseudo with an unrestricted class can acquire a vector register from the
+   ordinary move before the memory-only transfer is processed, recursively
+   requiring another secondary reload.  Let LRA own the spill slot so that
+   lra-spills.cc:remove_pseudos also applies the frame elimination offset.  */
+rtx
+ix86_knc_reload_bridge (machine_mode mode)
+{
+  gcc_assert (lra_in_progress && knc_scalar_transport_mode_p (mode));
+  return lra_create_new_reg_with_unique_value (mode, NULL_RTX, NO_REGS, NULL,
+                                              "KNC bridge");
 }
 
 bool

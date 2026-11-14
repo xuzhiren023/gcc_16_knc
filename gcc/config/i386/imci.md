@@ -285,7 +285,11 @@
               (match_operand:SI 2 "register_operand" "=&r")])]
   "TARGET_KNC"
 {
-  rtx mem = assign_stack_temp (<MODE>mode, GET_MODE_SIZE (<MODE>mode));
+  /* A NO_REGS pseudo makes the bridge memory-only from its creation.
+     A fresh assign_stack_temp here would miss the frame elimination offset
+     already applied to the surrounding RTL.  LRA's spill path applies the
+     full offset and keeps subsequent frame and stack-pointer updates.  */
+  rtx mem = ix86_knc_reload_bridge (<MODE>mode);
   rtx mask = gen_reg_rtx (HImode);
   emit_move_insn (operands[2], GEN_INT (GET_MODE_SIZE (<MODE>mode) > 8 ? 3 : 1));
   emit_insn (gen_knc_mask (mask, gen_lowpart (HImode, operands[2])));
@@ -300,7 +304,8 @@
               (match_operand:SI 2 "register_operand" "=&r")])]
   "TARGET_KNC"
 {
-  rtx mem = assign_stack_temp (<MODE>mode, GET_MODE_SIZE (<MODE>mode));
+  /* Let LRA allocate and eliminate the bridge slot, as for reload_out.  */
+  rtx mem = ix86_knc_reload_bridge (<MODE>mode);
   emit_move_insn (mem, operands[1]);
   if (<MODE>mode == TImode || <MODE>mode == TFmode)
     {
@@ -384,8 +389,11 @@
   [(set_attr "type" "imov,imovx,imov,imov,imov,mskmov,mskmov,mskmov,msklog,msklog")
    (set_attr "mode" "SI,SI,SI,QI,QI,QI,QI,QI,QI,QI")])
 
+;; Accept spill pseudos before allocation, but require real memory in the
+;; final instructions.  LRA owns their slot addresses (lra-spills.cc,
+;; remove_pseudos), including per-insn stack offsets and frame growth.
 (define_insn "knc_store<mode>"
-  [(set (match_operand:KNC_SCALAR 0 "memory_operand" "=m")
+  [(set (match_operand:KNC_SCALAR 0 "nonimmediate_operand" "=m")
         (unspec:KNC_SCALAR
           [(match_operand:KNC_SCALAR 1 "register_operand" "YJ")
            (match_operand:HI 2 "register_operand" "YL")]
@@ -413,19 +421,25 @@
 (define_insn "knc_load<mode>"
   [(set (match_operand:KNC_BROADCAST 0 "register_operand" "=YJ")
         (unspec:KNC_BROADCAST
-          [(match_operand:KNC_BROADCAST 1 "memory_operand" "m")]
+          [(match_operand:KNC_BROADCAST 1 "nonimmediate_operand" "m")]
           UNSPEC_KNC_TRANSFER))]
   "TARGET_KNC"
   "vbroadcast<knc_load>\t%1, %g0"
   [(set_attr "type" "ssemov")
    (set_attr "mode" "<MODE>")])
 
+;; A pair load and a store both have two UNSPEC inputs.  While the bridge
+;; is still a pseudo, their predicates accept the same register-only RTL.
+;; Distinguish the load before constraint processing: otherwise recog picks
+;; knc_store first and LRA reloads the destination into memory recursively.
+(define_c_enum "unspec" [UNSPEC_KNC_LOAD_PAIR])
+
 (define_insn "knc_load_pair<mode>"
   [(set (match_operand:KNC_PAIR 0 "register_operand" "=YJ")
         (unspec:KNC_PAIR
-          [(match_operand:KNC_PAIR 1 "memory_operand" "m")
+          [(match_operand:KNC_PAIR 1 "nonimmediate_operand" "m")
            (match_operand:HI 2 "register_operand" "YL")]
-          UNSPEC_KNC_TRANSFER))]
+          UNSPEC_KNC_LOAD_PAIR))]
   "TARGET_KNC"
   "vloadunpacklpd\t%1, %g0%{%2%}"
   [(set_attr "type" "ssemov")
@@ -510,7 +524,9 @@
     {
       /* The bridge has the mode's natural alignment, so a one/two-lane
          pack or unpack cannot straddle a 64-byte boundary.  */
-      rtx mem = assign_stack_temp (<MODE>mode, GET_MODE_SIZE (<MODE>mode));
+      rtx mem = lra_in_progress
+                ? ix86_knc_reload_bridge (<MODE>mode)
+                : assign_stack_temp (<MODE>mode, GET_MODE_SIZE (<MODE>mode));
       rtx gpr = gen_reg_rtx (SImode);
       rtx mask = gen_reg_rtx (HImode);
       emit_move_insn (gpr, GEN_INT (GET_MODE_SIZE (<MODE>mode) > 8 ? 3 : 1));
