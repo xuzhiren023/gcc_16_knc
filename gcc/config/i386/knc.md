@@ -9,8 +9,12 @@
 ;; dependence costs to issue opportunities, including the measured 1-cycle
 ;; AGI (not the old, unmeasured 3-cycle estimate).  Four-cycle vector chains
 ;; therefore need one accumulator at four threads, two at one/two threads.
-;; Each opportunity can issue U then V.  Vector and x87 require U; ordinary
-;; scalar and mask instructions can use either pipe.  Two vectors never pair.
+;; Each opportunity can issue U then V.  The current conservative model
+;; assigns vectors and x87 to U; ordinary scalar and mask instructions can
+;; use either pipe.  R02 pp.33-34 describes selected vector store/packstore
+;; classes eligible for V, with encoding restrictions on p.56.  Qualifying
+;; those exceptions and other pairing restrictions belongs to S12-14 B03;
+;; these reservations are not a complete hardware pairing table.
 
 (define_automaton "knc")
 (define_cpu_unit "knc-u,knc-v,knc-fp" "knc")
@@ -21,7 +25,8 @@
   (const_string "none"))
 
 ;; A software prefetch takes a scalar slot: C2 (S8-01) measured vprefetch0
-;; pairing with a vector op at no cost.
+;; pairing with a vector op at no incremental time in that sequence;
+;; this does not establish zero resource cost (R02 pp.34,56).
 (define_attr "knc_pipe" "scalar,vector,fp,serial"
   (cond [(eq_attr "knc_special" "prefetch") (const_string "scalar")
          (eq_attr "type" "mskmov,msklog") (const_string "scalar")

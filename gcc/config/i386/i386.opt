@@ -1406,7 +1406,7 @@ Target Joined UInteger Var(knc_prefetch_l1_distance) Init(16) IntegerRange(1, 40
 KNC L1 software prefetch distance in cache lines (default 16; halved when distance x streams x threads per core exceeds a quarter of L1; kept below the L2 distance).
 
 -param=knc-prefetch-l2-distance=
-Target Joined UInteger Var(knc_prefetch_l2_distance) Init(32) IntegerRange(1, 4096) Param Optimization
+Target Joined UInteger Var(knc_prefetch_l2_distance) Init(32) IntegerRange(2, 4096) Param Optimization
 KNC L2 software prefetch distance in cache lines (default 32).
 
 mphinix
