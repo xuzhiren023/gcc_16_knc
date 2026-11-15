@@ -25021,7 +25021,12 @@
   [(set (match_operand:V16SI 0 "register_operand")
 	(any_extend:V16SI
 	  (match_operand:V16QI 1 "nonimmediate_operand")))]
-  "TARGET_AVX512F || ix86_knc_transport_mode_p (V16QImode)")
+  "TARGET_AVX512F || ix86_knc_transport_mode_p (V16QImode)"
+{
+  /* The KNC up-conversion reads naturally aligned memory only.  */
+  if (TARGET_KNC && misaligned_operand (operands[1], V16QImode))
+    operands[1] = force_reg (V16QImode, operands[1]);
+})
 
 (define_insn "avx2_<code>v8qiv8si2<mask_name>"
   [(set (match_operand:V8SI 0 "register_operand" "=v")
@@ -25225,7 +25230,12 @@
   [(set (match_operand:V16SI 0 "register_operand")
 	(any_extend:V16SI
 	  (match_operand:V16HI 1 "nonimmediate_operand")))]
-  "TARGET_AVX512F || ix86_knc_transport_mode_p (V16HImode)")
+  "TARGET_AVX512F || ix86_knc_transport_mode_p (V16HImode)"
+{
+  /* The KNC up-conversion reads naturally aligned memory only.  */
+  if (TARGET_KNC && misaligned_operand (operands[1], V16HImode))
+    operands[1] = force_reg (V16HImode, operands[1]);
+})
 
 (define_insn_and_split "avx512f_zero_extendv16hiv16si2_1"
   [(set (match_operand:V32HI 0 "register_operand" "=v")

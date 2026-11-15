@@ -219,10 +219,12 @@
 ;; Intel 327364-001 pp.32-34, 379-384: converted memory accesses have
 ;; natural alignment and the exact source/destination mode's footprint.
 ;; A non-folded register source is reloaded through an explicit stack slot.
+;; Ba, not Bm: a special-memory constraint makes LRA refuse a source that
+;; kept its register instead of copying it to an aligned slot.
 (define_insn "*knc_<code><mode>v16si2"
   [(set (match_operand:V16SI 0 "register_operand" "=YJ")
         (any_extend:V16SI
-          (match_operand:KNC_NARROW 1 "nonimmediate_operand" "Bm")))]
+          (match_operand:KNC_NARROW 1 "nonimmediate_operand" "Ba")))]
   "TARGET_KNC && !misaligned_operand (operands[1], <MODE>mode)"
   "vmovdqa32\t{%1%{<knc_extend_kind>int<knc_narrow_bits>%}, %g0|%g0, %1%{<knc_extend_kind>int<knc_narrow_bits>%}}"
   [(set_attr "type" "ssecvt") (set_attr "mode" "XI")])
