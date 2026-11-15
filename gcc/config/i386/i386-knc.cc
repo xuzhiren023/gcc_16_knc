@@ -1407,6 +1407,23 @@ ix86_knc_align_thread_local (tree decl)
   SET_DECL_ALIGN (decl, KNC_LINE_BITS);
 }
 
+/* TARGET_INDIRECT_PREFETCH_POLICY.  */
+bool
+ix86_knc_indirect_prefetch_policy (unsigned *distance, unsigned *rows_ahead,
+				 unsigned *min_rows)
+{
+  if (!TARGET_KNC || !ix86_knc_indirect_prefetch || optimize < 2 || optimize_size)
+    return false;
+
+  /* S12-30 legal-gate: measured policy, not an architectural latency
+     constant.  Keep opt-in until compiler-generated and application A/B
+     results have been reviewed.  */
+  *distance = 32;
+  *rows_ahead = 3;
+  *min_rows = 16384;
+  return true;
+}
+
 /* TARGET_PREFETCH_DISTANCES.  Distances in cache lines for the two prefetch
    levels (knc-characterization.md C2, C5 and the S8-12 rerun, 2026-11-08):
    vprefetch1 (L2) at knc-prefetch-l2-distance, 32 lines at the best point of

@@ -12650,6 +12650,15 @@ default is @code{NULL}, which keeps a single latency-derived prefetch
 distance.
 @end deftypefn
 
+@deftypefn {Target Hook} bool TARGET_INDIRECT_PREFETCH_POLICY (unsigned *@var{distance}, unsigned *@var{rows_ahead}, unsigned *@var{min_rows})
+Return true to enable bounded indirect prefetch in the loop prefetch pass.
+Store the index lookahead in @var{distance}, the flat-array row lookahead
+in @var{rows_ahead}, and the minimum outer trip count in @var{min_rows}.
+The pass proves dereferenceability of ordinary index and bound loads,
+and versions nests on the minimum trip count before adding hints.
+The default is @code{NULL}, which disables the transformation.
+@end deftypefn
+
 @defmac POWI_MAX_MULTS
 If defined, this macro is interpreted as a signed integer C expression
 that specifies the maximum number of floating point multiplications

@@ -1409,6 +1409,10 @@ KNC L1 software prefetch distance in cache lines (default 16; halved when distan
 Target Joined UInteger Var(knc_prefetch_l2_distance) Init(32) IntegerRange(2, 4096) Param Optimization
 KNC L2 software prefetch distance in cache lines (default 32).
 
+mknc-indirect-prefetch
+Target Var(ix86_knc_indirect_prefetch) Init(0) Save
+Prefetch bounded indirect loads feeding scalar reductions on KNC (experimental, default off).
+
 mphinix
 Target Driver RejectNegative Condition({defined (KNC_DRIVER_OPTIONS)})
 KNC only: -O3 and the measured GCC-KNC defaults in one flag, with a banner and a progress bar on a terminal; IEEE semantics stay.

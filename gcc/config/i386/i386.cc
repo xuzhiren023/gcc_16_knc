@@ -28802,6 +28802,9 @@ ix86_libgcc_floating_mode_supported_p
 #undef TARGET_PREFETCH_DISTANCES
 #define TARGET_PREFETCH_DISTANCES ix86_knc_prefetch_distances
 
+#undef TARGET_INDIRECT_PREFETCH_POLICY
+#define TARGET_INDIRECT_PREFETCH_POLICY ix86_knc_indirect_prefetch_policy
+
 /* Disabled due to PRs 70902, 71453, 71555, 71596 and 71657.  */
 #undef TARGET_SPILL_CLASS
 #define TARGET_SPILL_CLASS ix86_spill_class

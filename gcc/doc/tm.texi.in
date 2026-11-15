@@ -8008,6 +8008,8 @@ lists.
 
 @hook TARGET_PREFETCH_DISTANCES
 
+@hook TARGET_INDIRECT_PREFETCH_POLICY
+
 @defmac POWI_MAX_MULTS
 If defined, this macro is interpreted as a signed integer C expression
 that specifies the maximum number of floating point multiplications
