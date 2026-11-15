@@ -9312,8 +9312,15 @@ vectorizable_nonlinear_induction (loop_vec_info loop_vinfo,
     case vect_step_op_neg:
       if (maybe_eq (TYPE_VECTOR_SUBPARTS (vectype), 1u))
 	return false;
-      if (TREE_CODE (init_expr) != INTEGER_CST
-	  && TREE_CODE (init_expr) != REAL_CST)
+      /* A constant start value folds, but it may no longer be the constant
+	 seen during analysis when the loop is transformed: an epilogue starts
+	 from the result of the main loop, and a loop with a peeled prologue
+	 from the result of that prologue.  */
+      if ((TREE_CODE (init_expr) != INTEGER_CST
+	   && TREE_CODE (init_expr) != REAL_CST)
+	  || LOOP_VINFO_EPILOGUE_P (loop_vinfo)
+	  || (LOOP_VINFO_PEELING_FOR_ALIGNMENT (loop_vinfo) != 0
+	      && !vect_use_loop_mask_for_alignment_p (loop_vinfo)))
 	{
 	  /* Check for backend support of NEGATE_EXPR and vec_perm.  */
 	  if (!directly_supported_p (NEGATE_EXPR, vectype))
