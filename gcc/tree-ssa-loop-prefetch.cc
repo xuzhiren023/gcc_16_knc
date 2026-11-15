@@ -813,14 +813,8 @@ indirect_emit (const indirect_reduction &r, unsigned distance, unsigned ahead)
 static bool
 prefetch_indirect_reductions ()
 {
-  unsigned distance, ahead, min_rows;
-  if (flag_non_call_exceptions || flag_trapv || !targetm.indirect_prefetch_policy
-      || !targetm.indirect_prefetch_policy (&distance, &ahead, &min_rows)
-      || !distance || distance > 4096 || !ahead || ahead > 3
-      || !min_rows || min_rows > INT_MAX)
+  if (flag_non_call_exceptions || flag_trapv || !targetm.indirect_prefetch_policy)
     return false;
-  /* The locality sample reads that many rows.  */
-  min_rows = MAX (min_rows, INDIRECT_SAMPLE);
   bool changed = false;
   /* Snapshot before versioning: copies must never be reconsidered.  */
   auto_vec<loop_p> candidates;
@@ -829,8 +823,15 @@ prefetch_indirect_reductions ()
   for (auto loop : candidates)
     {
       indirect_reduction r;
+      unsigned distance, ahead, min_rows;
+      /* The target sets its policy per form; the locality sample reads
+	 INDIRECT_SAMPLE rows, so no smaller nest is ever versioned.  */
       if (!indirect_find_reduction (loop, &r)
-	  || !indirect_version_policy (r, min_rows))
+	  || !targetm.indirect_prefetch_policy (!r.nested ? 2 : r.per_row ? 1 : 0,
+						&distance, &ahead, &min_rows)
+	  || !distance || distance > 4096 || !ahead || ahead > 3
+	  || !min_rows || min_rows > INT_MAX
+	  || !indirect_version_policy (r, MAX (min_rows, INDIRECT_SAMPLE)))
 	continue;
       bool emitted = indirect_emit (r, distance, ahead);
       mark_virtual_operands_for_renaming (cfun);

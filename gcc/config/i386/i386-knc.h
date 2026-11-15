@@ -27,7 +27,8 @@ class vec_perm_indices;
 class loop;
 class function_arg_info;
 
-extern bool ix86_knc_indirect_prefetch_policy (unsigned *, unsigned *, unsigned *);
+extern bool ix86_knc_indirect_prefetch_policy (unsigned, unsigned *, unsigned *,
+					       unsigned *);
 
 extern const struct processor_costs *ix86_knc_tune_cost
   (const struct gcc_options *, const struct processor_costs *);

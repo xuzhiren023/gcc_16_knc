@@ -1411,18 +1411,22 @@ ix86_knc_align_thread_local (tree decl)
   SET_DECL_ALIGN (decl, KNC_LINE_BITS);
 }
 
-/* Provisional S12-30 policy cutoff, shared by outer-row and lone-loop
-   versioning.  Replace with the compiler-gate's measured cutoff before
-   the default-on application A/B; this is not a hardware constant.
-   --param=knc-indirect-prefetch-min-trips overrides it.  */
-static const unsigned knc_indirect_prefetch_default_min_trips = 16384;
+/* Provisional S12-30 policy cutoffs, one per reduction form: rows of one
+   index array, rows with their own index pointer, lone loop.  Replace
+   with the compiler-gate's measured cutoffs before the default-on
+   application A/B; these are not hardware constants.
+   --param=knc-indirect-prefetch-min-trips overrides all three.  */
+static const unsigned knc_indirect_prefetch_default_min_trips[]
+  = { 16384, 16384, 16384 };
 
 /* TARGET_INDIRECT_PREFETCH_POLICY.  */
 bool
-ix86_knc_indirect_prefetch_policy (unsigned *distance, unsigned *rows_ahead,
-				 unsigned *min_rows)
+ix86_knc_indirect_prefetch_policy (unsigned form, unsigned *distance,
+				   unsigned *rows_ahead, unsigned *min_rows)
 {
-  if (!TARGET_KNC || !ix86_knc_indirect_prefetch || optimize < 2 || optimize_size)
+  if (!TARGET_KNC || !ix86_knc_indirect_prefetch || optimize < 2
+      || optimize_size
+      || form >= ARRAY_SIZE (knc_indirect_prefetch_default_min_trips))
     return false;
 
   /* S12-30 legal-gate lookahead, not architectural latency constants.  */
@@ -1430,7 +1434,7 @@ ix86_knc_indirect_prefetch_policy (unsigned *distance, unsigned *rows_ahead,
   *rows_ahead = 3;
   *min_rows = (knc_indirect_prefetch_min_trips
 	       ? knc_indirect_prefetch_min_trips
-	       : knc_indirect_prefetch_default_min_trips);
+	       : knc_indirect_prefetch_default_min_trips[form]);
   return true;
 }
 

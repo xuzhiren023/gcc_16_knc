@@ -2892,13 +2892,17 @@ distance.",
 /* Policy for bounded indirect loads feeding scalar reductions.  */
 DEFHOOK
 (indirect_prefetch_policy,
- "Return true to enable bounded indirect prefetch in the loop prefetch pass.\n\
-Store the index lookahead in @var{distance}, the flat-array row lookahead\n\
-in @var{rows_ahead}, and the minimum trip count in @var{min_rows}.\n\
+ "Return true to enable bounded indirect prefetch in the loop prefetch pass\n\
+for a reduction of form @var{form}: 0 for rows of one index array between\n\
+row bounds, 1 for rows that each have an index pointer and a count, and 2\n\
+for a lone loop.  Store the index lookahead in @var{distance}, the\n\
+flat-array row lookahead in @var{rows_ahead}, and the minimum row count\n\
+(form 2: trip count) in @var{min_rows}.\n\
 The pass proves dereferenceability of ordinary index and bound loads,\n\
-and versions nests (or lone loops) on that count before adding hints.\n\
+and versions nests (or lone loops) on that count and on a sample of their\n\
+first indices before adding hints.\n\
 The default is @code{NULL}, which disables the transformation.",
- bool, (unsigned *distance, unsigned *rows_ahead, unsigned *min_rows),
+ bool, (unsigned form, unsigned *distance, unsigned *rows_ahead, unsigned *min_rows),
  NULL)
 
 /* True if X is a legitimate MODE-mode immediate operand.  */
