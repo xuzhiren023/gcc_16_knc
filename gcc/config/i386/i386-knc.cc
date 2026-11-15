@@ -224,9 +224,18 @@ knc_processor_costs (unsigned chains)
     knc_stringops, knc_stringops,
     COSTS_N_INSNS (4), COSTS_N_INSNS (2), /* E: generic branch estimates,
                                           branch latency unmeasured.  */
-    "16", "16:11:8", "0:0:8", "64", /* M: functions on the 64-byte line
-                                       (S8-08 A/A pairs); loops, jumps and
-                                       labels generic.  */
+    "16:8:8", "16:11:8", "0:0:8", "64", /* M: functions on the 64-byte
+                                       line (S8-08 A/A pairs).  M: loop skip
+                                       at most 7 bytes (S12-31): a loop
+                                       entered by fallthrough runs its
+                                       padding, and the assembler's 9 to 15
+                                       byte nop carries 0x66/0x2e prefixes
+                                       (2 decode cycles each, R02 p.56,
+                                       verified in the source; hardware
+                                       stepping not stated there); lead card
+                                       2026-11-15, about 1.5 ns per prefix
+                                       after the second.  Jumps and labels
+                                       generic.  */
     4, 2, COSTS_N_INSNS (2) /* E: generic small unroll/mispredict heuristics;
                               only reduction unrolling measured here.  */
   };
