@@ -163,8 +163,11 @@ knc_processor_costs (unsigned chains)
                                  the half-cycle independent-add throughput.  */
     COSTS_N_INSNS (1),         /* E: LEA, one unpaired address operation.  */
     COSTS_N_INSNS (1), COSTS_N_INSNS (1), /* E: shifts, one scalar op.  */
-    {COSTS_N_INSNS (3), COSTS_N_INSNS (3), COSTS_N_INSNS (3),
-     COSTS_N_INSNS (3), COSTS_N_INSNS (6)}, /* E: integer mul, 3; TI two.  */
+    {COSTS_N_INSNS (10), COSTS_N_INSNS (10), COSTS_N_INSNS (10),
+     COSTS_N_INSNS (10), COSTS_N_INSNS (20)}, /* S12-21: R02 p.56 models a
+        ten-cycle scalar multiply; measured SI/DI register and memory forms
+        take about nine TSC ticks/op, dependent or independent.  Retain the
+        estimated two-multiply cost for TI.  See docs/research/s12-21-phase1.md.  */
     0,                        /* E: multiply not dependent on set bits.  */
     {COSTS_N_INSNS (16), COSTS_N_INSNS (22), COSTS_N_INSNS (30),
      COSTS_N_INSNS (74), COSTS_N_INSNS (74)}, /* E: unmeasured integer div;
