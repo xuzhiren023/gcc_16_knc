@@ -1283,13 +1283,17 @@ ix86_knc_vectorizer_params (struct gcc_options *opts,
      0.76x at 32, and every kernel stayed within 1.8% at 64.
      ix86_default_align reads the per-processor table, not the KNC one, so
      replace its choice here; an explicit -falign-functions= still wins, and
-     -Os or -fno-align-functions stays off.  Loops keep the default: 64 has
+     -Os or -fno-align-functions stays off.  Loops stay at 16: 64 has
      no max-skip, so an inner loop entered by fallthrough ran up to 63 bytes
-     of nops per outer trip (mat8 1.106x, mat16 1.173x slower on the card).  */
+     of nops per outer trip (mat8 1.106x, mat16 1.173x slower on the card).
+     S12-31: the KNC table bounds the loop skip at 7 bytes, taken the same
+     way.  */
   const processor_costs *knc = ix86_knc_tune_cost (opts, NULL);
   if (knc && opts->x_flag_align_functions
       && !opts_set->x_str_align_functions)
     opts->x_str_align_functions = knc->align_func;
+  if (knc && opts->x_flag_align_loops && !opts_set->x_str_align_loops)
+    opts->x_str_align_loops = knc->align_loop;
 
   /* S10-03 (ADR-0014 point 2): loops call libknc_vmath unless the user
      chose another vector library.  */
