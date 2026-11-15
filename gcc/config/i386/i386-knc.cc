@@ -30,6 +30,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "tm_p.h"
 #include "emit-rtl.h"
 #include "insn-config.h"
+#include "insn-attr.h"
 #include "insn-flags.h"
 #include "recog.h"
 #include "explow.h"
@@ -224,9 +225,18 @@ knc_processor_costs (unsigned chains)
     knc_stringops, knc_stringops,
     COSTS_N_INSNS (4), COSTS_N_INSNS (2), /* E: generic branch estimates,
                                           branch latency unmeasured.  */
-    "16", "16:11:8", "0:0:8", "64", /* M: functions on the 64-byte line
-                                       (S8-08 A/A pairs); loops, jumps and
-                                       labels generic.  */
+    "16:8:8", "16:11:8", "0:0:8", "64", /* M: functions on the 64-byte
+                                       line (S8-08 A/A pairs).  M: loop skip
+                                       at most 7 bytes (S12-31): a loop
+                                       entered by fallthrough runs its
+                                       padding, and the assembler's 9 to 15
+                                       byte nop carries 0x66/0x2e prefixes
+                                       (2 decode cycles each, R02 p.56,
+                                       verified in the source; hardware
+                                       stepping not stated there); lead card
+                                       2026-11-15, about 1.5 ns per prefix
+                                       after the second.  Jumps and labels
+                                       generic.  */
     4, 2, COSTS_N_INSNS (2) /* E: generic small unroll/mispredict heuristics;
                               only reduction unrolling measured here.  */
   };
@@ -262,6 +272,45 @@ ix86_knc_tune_features (const gcc_options *opts)
     return;
   ix86_tune_features[X86_TUNE_FAST_PREFIX] = 0;
   ix86_tune_features[X86_TUNE_ALIGN_TIGHT_LOOPS] = 0;
+}
+
+/* S12-31: true if the scheduler should keep CONDGEN directly before the
+   conditional jump CONDJMP.  A compare and its jump issue as one pair, and
+   pairing otherwise needs independent single-cycle instructions (R02 p.56,
+   verified in the source; production or pre-production hardware not stated
+   there).  An x87 instruction issues alone, so one scheduled between the two
+   leaves the jump an issue of its own: lead card 2026-11-15 (exclusive, one
+   core), 44.8 ns per 27-product row, 1.66 ns per iteration.  That a
+   flag-setting add or sub pairs with its jump like a compare is inference;
+   grouping them costs no issue either way.  A block with a vector
+   instruction, or without x87, keeps the S6-06 rule: a vector instruction
+   may take the compare or the jump as its partner, so the two stay free.  */
+bool
+ix86_knc_macro_fusion_pair_p (rtx_insn *condgen, rtx_insn *condjmp)
+{
+  if (!condgen || !NONJUMP_INSN_P (condgen) || !any_condjump_p (condjmp))
+    return false;
+  rtx flags = gen_rtx_REG (CCmode, FLAGS_REG);
+  if (!reg_referenced_p (flags, PATTERN (condjmp))
+      || !modified_in_p (flags, condgen)
+      || recog_memoized (condgen) < 0
+      || get_attr_knc_pipe (condgen) != KNC_PIPE_SCALAR)
+    return false;
+  bool x87 = false;
+  rtx_insn *insn;
+  FOR_BB_INSNS (BLOCK_FOR_INSN (condjmp), insn)
+    if (NONDEBUG_INSN_P (insn) && recog_memoized (insn) >= 0)
+      switch (get_attr_knc_pipe (insn))
+        {
+        case KNC_PIPE_VECTOR:
+          return false;
+        case KNC_PIPE_FP:
+          x87 = true;
+          break;
+        default:
+          break;
+        }
+  return x87;
 }
 
 /* Costs that need KNC lowering knowledge rather than x86 mode splitting.  */
@@ -1242,13 +1291,17 @@ ix86_knc_vectorizer_params (struct gcc_options *opts,
      0.76x at 32, and every kernel stayed within 1.8% at 64.
      ix86_default_align reads the per-processor table, not the KNC one, so
      replace its choice here; an explicit -falign-functions= still wins, and
-     -Os or -fno-align-functions stays off.  Loops keep the default: 64 has
+     -Os or -fno-align-functions stays off.  Loops stay at 16: 64 has
      no max-skip, so an inner loop entered by fallthrough ran up to 63 bytes
-     of nops per outer trip (mat8 1.106x, mat16 1.173x slower on the card).  */
+     of nops per outer trip (mat8 1.106x, mat16 1.173x slower on the card).
+     S12-31: the KNC table bounds the loop skip at 7 bytes, taken the same
+     way.  */
   const processor_costs *knc = ix86_knc_tune_cost (opts, NULL);
   if (knc && opts->x_flag_align_functions
       && !opts_set->x_str_align_functions)
     opts->x_str_align_functions = knc->align_func;
+  if (knc && opts->x_flag_align_loops && !opts_set->x_str_align_loops)
+    opts->x_str_align_loops = knc->align_loop;
 
   /* S10-03 (ADR-0014 point 2): loops call libknc_vmath unless the user
      chose another vector library.  */
