@@ -19,6 +19,9 @@ along with GCC; see the file COPYING3.  If not see
 
 #include "i386-knc.h"
 
+/* In i386-knc.cc; also used by generated constraint conditions.  */
+extern bool ix86_knc_aligned_mem_p (rtx, machine_mode);
+
 /* In i386-common.cc.  */
 extern bool ix86_handle_option (struct gcc_options *opts,
 				struct gcc_options *opts_set ATTRIBUTE_UNUSED,

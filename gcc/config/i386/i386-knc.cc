@@ -798,6 +798,14 @@ ix86_knc_report_loop (vec_info *vinfo, bool scalar_p)
 		   "costing\n");
 }
 
+/* Share the bridge alignment check with predicates and constraints without
+   exposing MEM_ALIGN to gencondmd.  */
+bool
+ix86_knc_aligned_mem_p (rtx mem, machine_mode mode)
+{
+  return MEM_P (mem) && MEM_ALIGN (mem) >= GET_MODE_ALIGNMENT (mode);
+}
+
 /* Also guard recognition after combine and reload.  Keep MEM_ALIGN in
    target code, since gencondmd does not expose that RTL accessor.  */
 bool
@@ -1625,6 +1633,18 @@ knc_scalar_transport_mode_p (machine_mode mode)
 {
   return mode == SFmode || mode == DFmode || mode == SImode
          || mode == DImode || mode == TImode || mode == TFmode;
+}
+
+/* LRA's get_equiv can replace a bridge pseudo without rechecking its
+   predicate.  Preserve the copy when its equivalent memory does not meet
+   the transport mode's alignment.  Other targets retain the default hook
+   result (ADR-0006).  */
+bool
+ix86_knc_cannot_substitute_mem_equiv_p (rtx subst)
+{
+  return TARGET_KNC && MEM_P (subst)
+         && knc_scalar_transport_mode_p (GET_MODE (subst))
+         && MEM_ALIGN (subst) < GET_MODE_ALIGNMENT (GET_MODE (subst));
 }
 
 /* A bridge created during LRA must start in memory.  In particular, a TI/TF

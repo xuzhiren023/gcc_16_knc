@@ -28692,6 +28692,8 @@ ix86_libgcc_floating_mode_supported_p
 
 #undef TARGET_SECONDARY_RELOAD
 #define TARGET_SECONDARY_RELOAD ix86_secondary_reload
+#undef TARGET_CANNOT_SUBSTITUTE_MEM_EQUIV_P
+#define TARGET_CANNOT_SUBSTITUTE_MEM_EQUIV_P ix86_knc_cannot_substitute_mem_equiv_p
 #undef TARGET_SECONDARY_MEMORY_NEEDED
 #define TARGET_SECONDARY_MEMORY_NEEDED ix86_secondary_memory_needed
 #undef TARGET_SECONDARY_MEMORY_NEEDED_MODE

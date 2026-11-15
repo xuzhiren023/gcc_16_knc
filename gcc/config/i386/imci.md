@@ -418,10 +418,12 @@
   DONE;
 })
 
+;; Reject under-aligned memory folds before LRA, but keep bridge pseudos
+;; recognizable.  Ba lets LRA copy a register operand to an aligned slot.
 (define_insn "knc_load<mode>"
   [(set (match_operand:KNC_BROADCAST 0 "register_operand" "=YJ")
         (unspec:KNC_BROADCAST
-          [(match_operand:KNC_BROADCAST 1 "nonimmediate_operand" "m")]
+          [(match_operand:KNC_BROADCAST 1 "knc_bridge_operand" "Ba")]
           UNSPEC_KNC_TRANSFER))]
   "TARGET_KNC"
   "vbroadcast<knc_load>\t%1, %g0"
@@ -437,7 +439,7 @@
 (define_insn "knc_load_pair<mode>"
   [(set (match_operand:KNC_PAIR 0 "register_operand" "=YJ")
         (unspec:KNC_PAIR
-          [(match_operand:KNC_PAIR 1 "nonimmediate_operand" "m")
+          [(match_operand:KNC_PAIR 1 "knc_bridge_operand" "m")
            (match_operand:HI 2 "register_operand" "YL")]
           UNSPEC_KNC_LOAD_PAIR))]
   "TARGET_KNC"
@@ -695,13 +697,14 @@
 ;; (Intel 327364-001 Table 4.2; S3-03: IMCI memory operands are aligned to
 ;; the access size).  Canonical RTL puts the vec_duplicate first for plus
 ;; and mult, and minus can only take it as the subtrahend.
+;; Bm also enforces scalar alignment during constraint processing.
 (define_mode_attr knc_bcst [(V16SF "1to16") (V8DF "1to8")])
 (define_code_iterator KNC_FP_COMM [plus mult])
 (define_insn "*knc_<knc_fp_binary><mode>3_bcst"
   [(set (match_operand:KNC_FP 0 "register_operand" "=YJ")
         (KNC_FP_COMM:KNC_FP
           (vec_duplicate:KNC_FP
-            (match_operand:<knc_fp_scalar> 2 "memory_operand" "m"))
+            (match_operand:<knc_fp_scalar> 2 "memory_operand" "Bm"))
           (match_operand:KNC_FP 1 "register_operand" "YJ")))]
   "TARGET_KNC && ix86_knc_element_aligned_mem_p (operands[2], <MODE>mode)"
   "v<knc_fp_binary><knc_fp_suffix>\t%2%{<knc_bcst>%}, %g1, %g0"
@@ -713,7 +716,7 @@
         (minus:KNC_FP
           (match_operand:KNC_FP 1 "register_operand" "YJ")
           (vec_duplicate:KNC_FP
-            (match_operand:<knc_fp_scalar> 2 "memory_operand" "m"))))]
+            (match_operand:<knc_fp_scalar> 2 "memory_operand" "Bm"))))]
   "TARGET_KNC && ix86_knc_element_aligned_mem_p (operands[2], <MODE>mode)"
   "vsub<knc_fp_suffix>\t%2%{<knc_bcst>%}, %g1, %g0"
   [(set_attr "type" "sseadd")
@@ -828,7 +831,7 @@
 ;; is negated (simplify_ternary_operation, FMA).
 (define_insn "*knc_fma<mode>4_bcst"
   [(set (match_operand:KNC_FP 0 "register_operand" "=YJ,YJ")
-        (fma:KNC_FP (vec_duplicate:KNC_FP (match_operand:<knc_fp_scalar> 1 "memory_operand" "m,m"))
+        (fma:KNC_FP (vec_duplicate:KNC_FP (match_operand:<knc_fp_scalar> 1 "memory_operand" "Bm,Bm"))
                     (match_operand:KNC_FP 2 "register_operand" "YJ,0")
                     (match_operand:KNC_FP 3 "register_operand" "0,YJ")))]
   "TARGET_KNC && ix86_knc_element_aligned_mem_p (operands[1], <MODE>mode)"
@@ -839,7 +842,7 @@
 
 (define_insn "*knc_fms<mode>4_bcst"
   [(set (match_operand:KNC_FP 0 "register_operand" "=YJ,YJ")
-        (fma:KNC_FP (vec_duplicate:KNC_FP (match_operand:<knc_fp_scalar> 1 "memory_operand" "m,m"))
+        (fma:KNC_FP (vec_duplicate:KNC_FP (match_operand:<knc_fp_scalar> 1 "memory_operand" "Bm,Bm"))
                     (match_operand:KNC_FP 2 "register_operand" "YJ,0")
                     (neg:KNC_FP (match_operand:KNC_FP 3 "register_operand" "0,YJ"))))]
   "TARGET_KNC && ix86_knc_element_aligned_mem_p (operands[1], <MODE>mode)"
@@ -851,7 +854,7 @@
 (define_insn "*knc_fnma<mode>4_bcst"
   [(set (match_operand:KNC_FP 0 "register_operand" "=YJ,YJ")
         (fma:KNC_FP (neg:KNC_FP (match_operand:KNC_FP 2 "register_operand" "YJ,0"))
-                    (vec_duplicate:KNC_FP (match_operand:<knc_fp_scalar> 1 "memory_operand" "m,m"))
+                    (vec_duplicate:KNC_FP (match_operand:<knc_fp_scalar> 1 "memory_operand" "Bm,Bm"))
                     (match_operand:KNC_FP 3 "register_operand" "0,YJ")))]
   "TARGET_KNC && ix86_knc_element_aligned_mem_p (operands[1], <MODE>mode)"
   "@
@@ -862,7 +865,7 @@
 (define_insn "*knc_fnms<mode>4_bcst"
   [(set (match_operand:KNC_FP 0 "register_operand" "=YJ,YJ")
         (fma:KNC_FP (neg:KNC_FP (match_operand:KNC_FP 2 "register_operand" "YJ,0"))
-                    (vec_duplicate:KNC_FP (match_operand:<knc_fp_scalar> 1 "memory_operand" "m,m"))
+                    (vec_duplicate:KNC_FP (match_operand:<knc_fp_scalar> 1 "memory_operand" "Bm,Bm"))
                     (neg:KNC_FP (match_operand:KNC_FP 3 "register_operand" "0,YJ"))))]
   "TARGET_KNC && ix86_knc_element_aligned_mem_p (operands[1], <MODE>mode)"
   "@
@@ -952,7 +955,7 @@
 (define_insn "*knc_broadcast_memory<mode>"
   [(set (match_operand:KNC_PACKED 0 "register_operand" "=YJ")
         (vec_duplicate:KNC_PACKED
-          (match_operand:<knc_packed_scalar> 1 "memory_operand" "m")))]
+          (match_operand:<knc_packed_scalar> 1 "memory_operand" "Bm")))]
   "TARGET_KNC && ix86_knc_element_aligned_mem_p (operands[1], <MODE>mode)"
   "<knc_packed_broadcast>\t%1, %g0"
   [(set_attr "type" "ssemov") (set_attr "mode" "<knc_packed_insn_mode>")])
@@ -965,7 +968,7 @@
 (define_insn_and_split "*knc_duplicate_reg<mode>"
   [(set (match_operand:KNC_FP 0 "register_operand" "=YJ,YJ")
         (vec_duplicate:KNC_FP
-          (match_operand:<knc_fp_scalar> 1 "register_operand" "YJ,m")))]
+          (match_operand:<knc_fp_scalar> 1 "register_operand" "YJ,Bm")))]
   "TARGET_KNC"
   "@
    #
@@ -1616,7 +1619,7 @@
 	(vec_merge:KNC_FP
 	  (fma:KNC_FP
 	    (vec_duplicate:KNC_FP
-	      (match_operand:<knc_fp_scalar> 1 "memory_operand" "m"))
+	      (match_operand:<knc_fp_scalar> 1 "memory_operand" "Bm"))
 	    (match_operand:KNC_FP 2 "register_operand" "YJ")
 	    (match_operand:KNC_FP 3 "register_operand" "0"))
 	  (match_dup 3)

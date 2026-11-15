@@ -1276,6 +1276,13 @@
        (ior (match_test "TARGET_AVX")
 	    (match_test "MEM_ALIGN (op) >= GET_MODE_ALIGNMENT (mode)"))))
 
+;; Keep KNC bridge pseudos recognizable while preventing optimizers from
+;; folding a memory source with less alignment than its transport mode.
+(define_predicate "knc_bridge_operand"
+  (ior (match_operand 0 "register_operand")
+       (and (match_operand 0 "memory_operand")
+	    (match_test "ix86_knc_aligned_mem_p (op, mode)"))))
+
 ; Return true when OP is register_operand or vector_memory_operand.
 (define_predicate "vector_operand"
   (ior (match_operand 0 "register_operand")
