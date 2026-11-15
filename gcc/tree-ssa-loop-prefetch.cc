@@ -482,17 +482,12 @@ indirect_load (basic_block bb, tree base, tree index, tree type)
   return indirect_append (bb, ref);
 }
 
+/* Keep the false arm unchanged so that the ordinary stream-prefetch
+   pass can still optimize it.  Inserting a guarded indirect load directly
+   into that arm would inhibit its straight-line loop recognition.  */
 static bool
-indirect_version_nest (const indirect_reduction &r, unsigned min_rows)
+indirect_version_loop (class loop *loop, tree cond)
 {
-  /* As in version_loop_on_niter, scale the count to avoid advertising
-     a new IV bound in the unchanged arm.  The outer entry proves a
-     positive signed-32 count, so this wide product cannot wrap.  */
-  tree type = long_long_unsigned_type_node;
-  tree count = fold_build2 (MULT_EXPR, type, fold_convert (type, r.outer.end),
-			   build_int_cst (type, 8));
-  tree cond = fold_build2 (GE_EXPR, boolean_type_node, count,
-			  build_int_cst (type, (unsigned HOST_WIDE_INT) min_rows * 8));
   if (integer_zerop (cond))
     return false;
   if (integer_nonzerop (cond))
@@ -500,9 +495,9 @@ indirect_version_nest (const indirect_reduction &r, unsigned min_rows)
   gimple_seq seq = NULL;
   cond = force_gimple_operand_1 (cond, &seq, is_gimple_condexpr_for_cond, NULL_TREE);
   if (seq)
-    gsi_insert_seq_on_edge_immediate (loop_preheader_edge (r.outer.loop), seq);
+    gsi_insert_seq_on_edge_immediate (loop_preheader_edge (loop), seq);
   profile_probability likely = profile_probability::likely ();
-  class loop *copy = loop_version (r.outer.loop, cond, NULL, likely,
+  class loop *copy = loop_version (loop, cond, NULL, likely,
 				  likely.invert (), likely, likely.invert (), true);
   if (!copy)
     return false;
@@ -510,38 +505,71 @@ indirect_version_nest (const indirect_reduction &r, unsigned min_rows)
   return true;
 }
 
-static void
+static bool
+indirect_version_policy (const indirect_reduction &r, unsigned min_count)
+{
+  const indirect_counted_loop &counted = r.nested ? r.outer : r.inner;
+  /* The entry test proves end > start.  Widen before subtraction so a
+     signed-32 interval crossing zero cannot overflow.  As in
+     version_loop_on_niter, scale the count to avoid advertising a new
+     IV bound in the unchanged arm.  */
+  tree wide = long_long_integer_type_node;
+  tree span = fold_build2 (MINUS_EXPR, wide,
+			  fold_convert (wide, counted.end),
+			  fold_convert (wide, counted.start));
+  tree type = long_long_unsigned_type_node;
+  tree count = fold_build2 (MULT_EXPR, type, fold_convert (type, span),
+			   build_int_cst (type, 8));
+  tree cond = fold_build2 (GE_EXPR, boolean_type_node, count,
+			  build_int_cst (type,
+				 (unsigned HOST_WIDE_INT) min_count * 8));
+  return indirect_version_loop (counted.loop, cond);
+}
+
+static bool
 indirect_emit (const indirect_reduction &r, unsigned distance, unsigned ahead)
 {
-  basic_block bb = r.inner.loop->header;
-  split_block_after_labels (bb);
   tree wide = long_long_integer_type_node;
   tree index = fold_convert (wide, r.inner.iv);
   tree bound = r.inner.end;
   tree indices = r.indices;
   if (r.nested)
     {
-      /* Subtract in a wider signed type: neither the row guard nor the
-	 in-row lookahead may overflow for INT_MIN/INT_MAX endpoints.  */
+      /* Version the inner loop on row-invariant guards.  Metadata loads
+	 then execute once per nonempty current row, after the entry test,
+	 and only when the future row exists.  The false copies retain the
+	 original reduction and need no sentinel bound or pointer PHI.  */
       unsigned rows_ahead = r.per_row ? 1 : ahead;
       tree remaining = fold_build2 (MINUS_EXPR, wide,
 		fold_convert (wide, r.outer.end), fold_convert (wide, r.outer.iv));
-      bb = indirect_guard (bb, GT_EXPR, remaining,
-			   build_int_cst (wide, rows_ahead));
+      tree cond = fold_build2 (GT_EXPR, boolean_type_node, remaining,
+			      build_int_cst (wide, rows_ahead));
+      if (!indirect_version_loop (r.inner.loop, cond))
+	return false;
+      basic_block setup = split_edge (loop_preheader_edge (r.inner.loop));
       tree future_row = fold_build2 (PLUS_EXPR, wide,
 		fold_convert (wide, r.outer.iv),
 		build_int_cst (wide, r.per_row ? 1 : ahead + 1));
-      bound = indirect_load (bb, r.bounds, future_row, TREE_TYPE (r.inner.end));
+      bound = indirect_load (setup, r.bounds, future_row, TREE_TYPE (r.inner.end));
       if (r.per_row)
 	{
-	  /* Zero/negative count: no pointer or index load.  This matters
-	     for empty future rows whose pointers need not be valid.  */
-	  bb = indirect_guard (bb, LT_EXPR, r.inner.iv, bound);
-	  indices = indirect_load (bb, r.pointers, future_row,
+	  /* An empty future row need not have an initialized pointer.
+	     Keep its pointer load behind a once-per-row positive-count
+	     test, as well as keeping each index load behind j < bound.  */
+	  cond = fold_build2 (GT_EXPR, boolean_type_node, bound,
+			      build_zero_cst (TREE_TYPE (bound)));
+	  if (!indirect_version_loop (r.inner.loop, cond))
+	    return false;
+	  setup = split_edge (loop_preheader_edge (r.inner.loop));
+	  indices = indirect_load (setup, r.pointers, future_row,
 				   TREE_TYPE (r.indices));
 	}
     }
-  if (!r.nested || !r.per_row)
+  basic_block bb = r.inner.loop->header;
+  split_block_after_labels (bb);
+  if (r.nested && r.per_row)
+    bb = indirect_guard (bb, LT_EXPR, r.inner.iv, bound);
+  else
     {
       tree remaining = fold_build2 (MINUS_EXPR, wide,
 				    fold_convert (wide, bound), index);
@@ -554,6 +582,7 @@ indirect_emit (const indirect_reduction &r, unsigned distance, unsigned ahead)
 				 3, addr, integer_zero_node, build_int_cst (integer_type_node, 3));
   gimple_stmt_iterator gsi = gsi_last_bb (bb);
   gsi_insert_after (&gsi, hint, GSI_NEW_STMT);
+  return true;
 }
 
 static bool
@@ -574,15 +603,15 @@ prefetch_indirect_reductions ()
     {
       indirect_reduction r;
       if (!indirect_find_reduction (loop, &r)
-	  || (r.nested && !indirect_version_nest (r, min_rows)))
+	  || !indirect_version_policy (r, min_rows))
 	continue;
-      indirect_emit (r, distance, ahead);
+      bool emitted = indirect_emit (r, distance, ahead);
       mark_virtual_operands_for_renaming (cfun);
       update_ssa (TODO_update_ssa);
       rewrite_into_loop_closed_ssa (NULL, TODO_update_ssa_only_virtuals);
       scev_reset ();
       changed = true;
-      if (dump_file)
+      if (dump_file && emitted)
 	fprintf (dump_file, "Bounded indirect prefetch in loop %d: %s\n",
 		 loop->num, r.nested ? (r.per_row ? "next-row pointers" : "future row bound")
 		 : "row-local bound");

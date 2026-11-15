@@ -2894,9 +2894,9 @@ DEFHOOK
 (indirect_prefetch_policy,
  "Return true to enable bounded indirect prefetch in the loop prefetch pass.\n\
 Store the index lookahead in @var{distance}, the flat-array row lookahead\n\
-in @var{rows_ahead}, and the minimum outer trip count in @var{min_rows}.\n\
+in @var{rows_ahead}, and the minimum trip count in @var{min_rows}.\n\
 The pass proves dereferenceability of ordinary index and bound loads,\n\
-and versions nests on the minimum trip count before adding hints.\n\
+and versions nests (or lone loops) on that count before adding hints.\n\
 The default is @code{NULL}, which disables the transformation.",
  bool, (unsigned *distance, unsigned *rows_ahead, unsigned *min_rows),
  NULL)
