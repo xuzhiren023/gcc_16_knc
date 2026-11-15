@@ -1411,7 +1411,7 @@ KNC L2 software prefetch distance in cache lines (default 32).
 
 mknc-indirect-prefetch
 Target Var(ix86_knc_indirect_prefetch) Init(0) Save
-Prefetch bounded indirect loads feeding scalar reductions on KNC (experimental, default off).
+Prefetch bounded indirect loads feeding scalar reductions on KNC (default at -O2 and above, except size optimization).
 
 mphinix
 Target Driver RejectNegative Condition({defined (KNC_DRIVER_OPTIONS)})

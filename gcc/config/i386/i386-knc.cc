@@ -1198,6 +1198,10 @@ ix86_knc_vectorizer_params (struct gcc_options *opts,
       && opts->x_optimize >= 2
       && !opts->x_optimize_size)
     opts->x_flag_prefetch_loop_arrays = 1;
+  /* S12-30: follow the KNC software-prefetch optimization levels, while
+     preserving an explicit -mno-knc-indirect-prefetch.  */
+  SET_OPTION_IF_UNSET (opts, opts_set, ix86_knc_indirect_prefetch,
+		       opts->x_optimize >= 2 && !opts->x_optimize_size);
   SET_OPTION_IF_UNSET (opts, opts_set, param_min_insn_to_prefetch_ratio, 1);
   SET_OPTION_IF_UNSET (opts, opts_set, param_prefetch_min_insn_to_mem_ratio,
 		       1);
@@ -1407,6 +1411,11 @@ ix86_knc_align_thread_local (tree decl)
   SET_DECL_ALIGN (decl, KNC_LINE_BITS);
 }
 
+/* Provisional S12-30 policy cutoff, shared by outer-row and lone-loop
+   versioning.  Replace with the compiler-gate's measured cutoff before
+   the default-on application A/B; this is not a hardware constant.  */
+static const unsigned knc_indirect_prefetch_min_trips = 16384;
+
 /* TARGET_INDIRECT_PREFETCH_POLICY.  */
 bool
 ix86_knc_indirect_prefetch_policy (unsigned *distance, unsigned *rows_ahead,
@@ -1415,12 +1424,10 @@ ix86_knc_indirect_prefetch_policy (unsigned *distance, unsigned *rows_ahead,
   if (!TARGET_KNC || !ix86_knc_indirect_prefetch || optimize < 2 || optimize_size)
     return false;
 
-  /* S12-30 legal-gate: measured policy, not an architectural latency
-     constant.  Keep opt-in until compiler-generated and application A/B
-     results have been reviewed.  */
+  /* S12-30 legal-gate lookahead, not architectural latency constants.  */
   *distance = 32;
   *rows_ahead = 3;
-  *min_rows = 16384;
+  *min_rows = knc_indirect_prefetch_min_trips;
   return true;
 }
 
