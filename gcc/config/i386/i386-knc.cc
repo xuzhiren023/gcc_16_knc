@@ -798,6 +798,14 @@ ix86_knc_report_loop (vec_info *vinfo, bool scalar_p)
 		   "costing\n");
 }
 
+/* Share the bridge alignment check with predicates and constraints without
+   exposing MEM_ALIGN to gencondmd.  */
+bool
+ix86_knc_aligned_mem_p (rtx mem, machine_mode mode)
+{
+  return MEM_P (mem) && MEM_ALIGN (mem) >= GET_MODE_ALIGNMENT (mode);
+}
+
 /* Also guard recognition after combine and reload.  Keep MEM_ALIGN in
    target code, since gencondmd does not expose that RTL accessor.  */
 bool

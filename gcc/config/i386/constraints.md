@@ -193,7 +193,7 @@
   "@internal Mode-aligned KNC bridge memory operand."
   (and (match_test "TARGET_KNC")
        (match_operand 0 "memory_operand")
-       (match_test "MEM_ALIGN (op) >= GET_MODE_ALIGNMENT (GET_MODE (op))")))
+       (match_test "ix86_knc_aligned_mem_p (op, GET_MODE (op))")))
 
 (define_special_memory_constraint "Bk"
   "@internal TLS address that allows insn using non-integer registers."
