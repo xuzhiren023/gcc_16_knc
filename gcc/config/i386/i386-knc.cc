@@ -282,9 +282,9 @@ ix86_knc_tune_features (const gcc_options *opts)
    leaves the jump an issue of its own: lead card 2026-11-15 (exclusive, one
    core), 44.8 ns per 27-product row, 1.66 ns per iteration.  That a
    flag-setting add or sub pairs with its jump like a compare is inference;
-   grouping them costs no issue either way.  Blocks without x87 keep the
-   S6-06 rule: a vector instruction may take the compare or the jump as its
-   partner, so the two stay free.  */
+   grouping them costs no issue either way.  A block with a vector
+   instruction, or without x87, keeps the S6-06 rule: a vector instruction
+   may take the compare or the jump as its partner, so the two stay free.  */
 bool
 ix86_knc_macro_fusion_pair_p (rtx_insn *condgen, rtx_insn *condjmp)
 {
@@ -296,13 +296,21 @@ ix86_knc_macro_fusion_pair_p (rtx_insn *condgen, rtx_insn *condjmp)
       || recog_memoized (condgen) < 0
       || get_attr_knc_pipe (condgen) != KNC_PIPE_SCALAR)
     return false;
+  bool x87 = false;
   rtx_insn *insn;
   FOR_BB_INSNS (BLOCK_FOR_INSN (condjmp), insn)
-    if (NONDEBUG_INSN_P (insn)
-        && recog_memoized (insn) >= 0
-        && get_attr_knc_pipe (insn) == KNC_PIPE_FP)
-      return true;
-  return false;
+    if (NONDEBUG_INSN_P (insn) && recog_memoized (insn) >= 0)
+      switch (get_attr_knc_pipe (insn))
+        {
+        case KNC_PIPE_VECTOR:
+          return false;
+        case KNC_PIPE_FP:
+          x87 = true;
+          break;
+        default:
+          break;
+        }
+  return x87;
 }
 
 /* Costs that need KNC lowering knowledge rather than x86 mode splitting.  */
