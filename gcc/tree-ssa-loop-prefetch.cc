@@ -546,9 +546,12 @@ indirect_load (basic_block bb, tree base, tree index, tree type)
 
 /* Keep the false arm unchanged so that the ordinary stream-prefetch
    pass can still optimize it.  Inserting a guarded indirect load directly
-   into that arm would inhibit its straight-line loop recognition.  */
+   into that arm would inhibit its straight-line loop recognition.
+   LIKELY is the probability of the hinted arm.  */
 static bool
-indirect_version_loop (class loop *loop, tree cond)
+indirect_version_loop (class loop *loop, tree cond,
+		       profile_probability likely
+		       = profile_probability::likely ())
 {
   if (integer_zerop (cond))
     return false;
@@ -558,7 +561,6 @@ indirect_version_loop (class loop *loop, tree cond)
   cond = force_gimple_operand_1 (cond, &seq, is_gimple_condexpr_for_cond, NULL_TREE);
   if (seq)
     gsi_insert_seq_on_edge_immediate (loop_preheader_edge (loop), seq);
-  profile_probability likely = profile_probability::likely ();
   class loop *copy = loop_version (loop, cond, NULL, likely,
 				  likely.invert (), likely, likely.invert (), true);
   if (!copy)
@@ -575,6 +577,106 @@ indirect_limit (tree base, tree index, tree element_type)
   tree bytes = fold_build2 (MULT_EXPR, type, fold_convert (type, index),
 			    fold_convert (type, TYPE_SIZE_UNIT (element_type)));
   return fold_build2 (PLUS_EXPR, type, fold_convert (type, base), bytes);
+}
+
+/* Rows (a lone loop: iterations) read by the locality sample.  */
+#define INDIRECT_SAMPLE 3u
+
+/* Indices no further apart than this address one cache line of values.  */
+static unsigned HOST_WIDE_INT
+indirect_near (const indirect_reduction &r)
+{
+  unsigned HOST_WIDE_INT size = tree_to_uhwi (TYPE_SIZE_UNIT (r.value_type));
+  return MAX ((unsigned HOST_WIDE_INT) param_l1_cache_line_size / size, 1);
+}
+
+/* Profitability.  COND holds on entry to the nest (or lone loop) when it
+   has enough rows and every recorded store is disjoint from the bounds.
+   Under COND, read the first index of the first INDIRECT_SAMPLE rows in
+   iteration order (a lone loop: its first indices), and return a boolean
+   that is true when each is more than indirect_near elements from the
+   one before.  Rows of a stencil or a band start a few elements apart and
+   the unhinted code already serves them; rows with scattered columns do
+   not.  This runs once per execution of the nest, never per element.
+
+   Every load is one the nest itself performs.  The rows lie inside the
+   interval, because COND implies at least INDIRECT_SAMPLE of them and no
+   call or exit can end the nest early.  No store in the nest may change
+   the bounds or pointers read (static alias sets, or the disjointness in
+   COND).  First indices are read only once every sampled row is known
+   nonempty, and a per-row pointer only for a positive count; an empty
+   sampled row leaves the result false.  A value the nest stores before
+   its row runs can only make the choice of arm stale.  */
+static tree
+indirect_sample (const indirect_reduction &r, tree cond)
+{
+  const indirect_counted_loop &counted = r.nested ? r.outer : r.inner;
+  tree wide = long_long_integer_type_node;
+  basic_block bb = split_edge (loop_preheader_edge (counted.loop));
+  basic_block join = split_edge (single_succ_edge (bb));
+  bb = indirect_guard (bb, NE_EXPR, cond, boolean_false_node);
+
+  tree first = fold_convert (wide, counted.start);
+  tree index[INDIRECT_SAMPLE];
+  if (!r.nested)
+    for (unsigned k = 0; k != INDIRECT_SAMPLE; ++k)
+      index[k] = indirect_load (bb, r.indices,
+				fold_build2 (PLUS_EXPR, wide, first,
+					     build_int_cst (wide, k)),
+				r.index_type);
+  else
+    {
+      /* The flat form also needs the end of the last sampled row.  */
+      tree row[INDIRECT_SAMPLE + 1], bound[INDIRECT_SAMPLE + 1];
+      for (unsigned k = 0; k != INDIRECT_SAMPLE + !r.per_row; ++k)
+	{
+	  row[k] = fold_build2 (counted.down ? MINUS_EXPR : PLUS_EXPR, wide,
+				first, build_int_cst (wide, k));
+	  bound[k] = indirect_load (bb, r.bounds, row[k], r.bound_type);
+	}
+      for (unsigned k = 0; k != INDIRECT_SAMPLE; ++k)
+	bb = (r.per_row
+	      ? indirect_guard (bb, GT_EXPR, bound[k],
+				build_zero_cst (r.bound_type))
+	      : indirect_guard (bb, LT_EXPR, bound[k], bound[k + 1]));
+      for (unsigned k = 0; k != INDIRECT_SAMPLE; ++k)
+	{
+	  tree base = r.indices, at = fold_convert (wide, bound[k]);
+	  if (r.per_row)
+	    {
+	      base = indirect_load (bb, r.pointers, row[k],
+				    TREE_TYPE (r.indices));
+	      at = build_zero_cst (wide);
+	    }
+	  index[k] = indirect_load (bb, base, at, r.index_type);
+	}
+    }
+
+  /* |GAP| > WITHIN as one unsigned comparison, for each neighbouring pair.  */
+  unsigned HOST_WIDE_INT within = indirect_near (r);
+  tree type = long_long_unsigned_type_node, scattered = boolean_true_node;
+  for (unsigned k = 1; k != INDIRECT_SAMPLE; ++k)
+    {
+      tree gap = fold_build2 (MINUS_EXPR, wide, fold_convert (wide, index[k]),
+			      fold_convert (wide, index[k - 1]));
+      tree apart = fold_build2 (GT_EXPR, boolean_type_node,
+				fold_build2 (PLUS_EXPR, type,
+					     fold_convert (type, gap),
+					     build_int_cst (type, within)),
+				build_int_cst (type, 2 * within));
+      scattered = fold_build2 (TRUTH_AND_EXPR, boolean_type_node, scattered,
+			       apart);
+    }
+  scattered = indirect_append (bb, scattered);
+
+  tree chosen = make_ssa_name (boolean_type_node);
+  gphi *phi = create_phi_node (chosen, join);
+  edge e;
+  edge_iterator ei;
+  FOR_EACH_EDGE (e, ei, join->preds)
+    add_phi_arg (phi, e->src == bb ? scattered : boolean_false_node, e,
+		 UNKNOWN_LOCATION);
+  return chosen;
 }
 
 static bool
@@ -604,15 +706,19 @@ indirect_version_policy (const indirect_reduction &r, unsigned min_count)
 			fold_build2 (GT_EXPR, boolean_type_node, high, low),
 			cond);
   /* Every recorded store writes BASE[row] for rows in [LOW, HIGH) only,
-     and every speculative bound load reads BOUNDS[row] in that interval.
-     Hint only when the two byte ranges are disjoint, so that a later
-     row's bound is the value its own iteration will read.  */
+     and every speculative bound load reads BOUNDS[row] in that interval;
+     the flat form, whose row ends at BOUNDS[row + 1], also reads
+     BOUNDS[HIGH].  Hint only when the two byte ranges are disjoint, so
+     that a later row's bound is the value its own iteration will read.  */
   if (r.nested)
     for (unsigned i = 0; i < r.n_stores; ++i)
       {
+	tree last = high;
+	if (!r.per_row)
+	  last = fold_build2 (PLUS_EXPR, wide, high, build_one_cst (wide));
 	tree before = fold_build2
 	  (LE_EXPR, boolean_type_node,
-	   indirect_limit (r.bounds, high, r.bound_type),
+	   indirect_limit (r.bounds, last, r.bound_type),
 	   indirect_limit (r.stores[i], low, r.store_types[i]));
 	tree after = fold_build2
 	  (LE_EXPR, boolean_type_node,
@@ -622,7 +728,15 @@ indirect_version_policy (const indirect_reduction &r, unsigned min_count)
 			    fold_build2 (TRUTH_OR_EXPR, boolean_type_node,
 					 before, after));
       }
-  return indirect_version_loop (counted.loop, cond);
+  if (integer_zerop (cond))
+    return false;
+  /* Neither arm is the likely one: the unhinted copy must stay the code
+     emitted without this transformation, laid out as hot code.  */
+  tree chosen = indirect_sample (r, cond);
+  return indirect_version_loop (counted.loop,
+				fold_build2 (NE_EXPR, boolean_type_node,
+					     chosen, boolean_false_node),
+				profile_probability::even ());
 }
 
 static bool
@@ -705,6 +819,8 @@ prefetch_indirect_reductions ()
       || !distance || distance > 4096 || !ahead || ahead > 3
       || !min_rows || min_rows > INT_MAX)
     return false;
+  /* The locality sample reads that many rows.  */
+  min_rows = MAX (min_rows, INDIRECT_SAMPLE);
   bool changed = false;
   /* Snapshot before versioning: copies must never be reconsidered.  */
   auto_vec<loop_p> candidates;
@@ -723,9 +839,11 @@ prefetch_indirect_reductions ()
       scev_reset ();
       changed = true;
       if (dump_file && emitted)
-	fprintf (dump_file, "Bounded indirect prefetch in loop %d: %s\n",
+	fprintf (dump_file, "Bounded indirect prefetch in loop %d: %s;"
+		 " locality sample of %u, more than %u apart\n",
 		 loop->num, r.nested ? (r.per_row ? "next-row pointers" : "future row bound")
-		 : "row-local bound");
+		 : "row-local bound", INDIRECT_SAMPLE,
+		 (unsigned) indirect_near (r));
     }
   return changed;
 }

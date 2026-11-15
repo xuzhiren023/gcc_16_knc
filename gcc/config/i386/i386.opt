@@ -1413,6 +1413,10 @@ mknc-indirect-prefetch
 Target Var(ix86_knc_indirect_prefetch) Init(0) Save
 Prefetch bounded indirect loads feeding scalar reductions on KNC (default at -O2 and above, except size optimization).
 
+-param=knc-indirect-prefetch-min-trips=
+Target Joined UInteger Var(knc_indirect_prefetch_min_trips) Init(0) IntegerRange(0, 1073741824) Param Optimization
+KNC minimum row count of a nest, or trip count of a lone loop, for bounded indirect prefetch (0, the default, selects the built-in cutoff).
+
 mphinix
 Target Driver RejectNegative Condition({defined (KNC_DRIVER_OPTIONS)})
 KNC only: -O3 and the measured GCC-KNC defaults in one flag, with a banner and a progress bar on a terminal; IEEE semantics stay.

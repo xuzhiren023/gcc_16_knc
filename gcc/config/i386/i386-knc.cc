@@ -1413,8 +1413,9 @@ ix86_knc_align_thread_local (tree decl)
 
 /* Provisional S12-30 policy cutoff, shared by outer-row and lone-loop
    versioning.  Replace with the compiler-gate's measured cutoff before
-   the default-on application A/B; this is not a hardware constant.  */
-static const unsigned knc_indirect_prefetch_min_trips = 16384;
+   the default-on application A/B; this is not a hardware constant.
+   --param=knc-indirect-prefetch-min-trips overrides it.  */
+static const unsigned knc_indirect_prefetch_default_min_trips = 16384;
 
 /* TARGET_INDIRECT_PREFETCH_POLICY.  */
 bool
@@ -1427,7 +1428,9 @@ ix86_knc_indirect_prefetch_policy (unsigned *distance, unsigned *rows_ahead,
   /* S12-30 legal-gate lookahead, not architectural latency constants.  */
   *distance = 32;
   *rows_ahead = 3;
-  *min_rows = knc_indirect_prefetch_min_trips;
+  *min_rows = (knc_indirect_prefetch_min_trips
+	       ? knc_indirect_prefetch_min_trips
+	       : knc_indirect_prefetch_default_min_trips);
   return true;
 }
 
