@@ -605,9 +605,9 @@ ia32_multipass_dfa_lookahead (void)
 bool
 ix86_macro_fusion_p ()
 {
-  /* KNC pairs two instructions; it does not fuse an ALU operation with a
-     branch.  Grouping them would strand scalar work at the loop tail.  */
-  return ix86_schedule != CPU_KNC && TARGET_FUSE_CMP_AND_BRANCH;
+  /* KNC pairs two instructions; it does not fuse.  Its pair hook groups a
+     compare with its jump only where x87 would separate them.  */
+  return ix86_schedule == CPU_KNC || TARGET_FUSE_CMP_AND_BRANCH;
 }
 
 /* Check whether MOV is a reg-reg move and ALU is an
@@ -684,6 +684,8 @@ ix86_fuse_mov_alu_p (rtx_insn *mov, rtx_insn *alu)
 bool
 ix86_macro_fusion_pair_p (rtx_insn *condgen, rtx_insn *condjmp)
 {
+  if (ix86_schedule == CPU_KNC)
+    return ix86_knc_macro_fusion_pair_p (condgen, condjmp);
   if (TARGET_FUSE_MOV_AND_ALU
       && ix86_fuse_mov_alu_p (condgen, condjmp))
     return true;
