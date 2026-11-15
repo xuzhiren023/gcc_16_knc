@@ -48,23 +48,55 @@ _Static_assert (sizeof(struct fenv) <= (size_t) GFC_FPE_STATE_BUFFER_SIZE,
 		"GFC_FPE_STATE_BUFFER_SIZE is too small");
 
 /* KNC has MXCSR but no SSE.  The S7-07 card probe (2026-11-07)
-   established sticky flags 0-5 and rounding control 13-14.  Bits 7-12
-   are reserved, and bit 21 and other controls must survive every write.
+   established sticky flags 0-5 and rounding control 13-14.  R27 Table 2.15
+   p.39 (verified early KNC specification): bits 7-12 and 20 are reserved;
+   bit 21 is DUE (Disable Unmasked Exceptions) and must survive every write.
    IMCI does not halt on exceptions, even with x87 exceptions unmasked.
    Consequently halting and mixed x87/IMCI underflow control are unsupported.
    See fpu-387.h for the x87 environment layout and rounding encodings.  */
 #define KNC_FLAGS 0x3fu
 #define KNC_ROUND 0x6000u
-#define KNC_RESERVED 0x1f80u
+#define KNC_RESERVED 0x101f80u
 #define _FPU_RC_NEAREST 0
 #define _FPU_RC_DOWN 1
 #define _FPU_RC_UP 2
 #define _FPU_RC_ZERO 3
 #define _FPU_RC_MASK 3
 
+/* R12 CD28 p.25 (verified production x100 erratum) specifies saving the
+   full x87 state, editing its status, and restoring it to clear an unmasked
+   exception.  Foreign code can unmask x87 even though our mixed-domain
+   halting API is unsupported.  Both flag clearing and environment restore
+   can therefore need this recovery.  Retain all eight live register values.
+   The first 28 bytes have the same layout as fenv before __mxcsr.  */
+struct knc_x87_state
+{
+  unsigned short words[54];
+};
+_Static_assert (sizeof (struct knc_x87_state) == 108
+                && __builtin_offsetof (struct fenv, __mxcsr) == 28,
+                "unexpected x87 save layout");
+
+static void
+knc_restore_x87 (struct knc_x87_state *state)
+{
+  unsigned short cw = state->words[0];
+  unsigned short sw = state->words[2];
+  /* Recompute ES and B from the remaining unmasked exception flags, so
+     clearing the last pending exception cannot leave a stale summary.  */
+  sw &= ~0x8080u;
+  if (sw & ~cw & KNC_FLAGS)
+    sw |= 0x8080u;
+  state->words[2] = sw;
+  __asm__ __volatile__ ("frstor\t%0" : : "m" (*state) : "memory");
+}
+
 static unsigned int
 knc_mxcsr (void)
 {
+  /* R12 CD19 p.23 (verified production x100 erratum): a vector operand
+     fault can change MXCSR.  This reads the live word; it cannot recover
+     the pre-fault flags for a signal handler.  */
   unsigned int value;
   __asm__ __volatile__ ("stmxcsr\t%0" : "=m" (value));
   return value;
@@ -144,14 +176,16 @@ get_fpu_except_flags (void)
 void
 set_fpu_except_flags (int set, int clear)
 {
-  struct fenv env;
+  struct knc_x87_state state;
   unsigned int raised = knc_exception_bits (set);
   unsigned int cleared = knc_exception_bits (clear);
   /* Set sticky state directly: flag setting is not an attempt to emulate
      unsupported IMCI halting.  Setting wins when both arguments name a bit.  */
-  __asm__ __volatile__ ("fnstenv\t%0" : "=m" (env));
-  env.__status_word = (env.__status_word & ~cleared) | raised;
-  __asm__ __volatile__ ("fldenv\t%0" : : "m" (env));
+  __asm__ __volatile__ ("fnsave\t%0" : "=m" (state) : : "memory");
+  state.words[2] = (state.words[2] & ~cleared) | raised;
+  if (cleared & 1)
+    state.words[2] &= ~0x40u; /* SF accompanies the invalid exception.  */
+  knc_restore_x87 (&state);
   knc_update_mxcsr (cleared | raised, raised);
 }
 
@@ -245,7 +279,10 @@ void
 set_fpu_state (void *state)
 {
   struct fenv *env = state;
-  __asm__ __volatile__ ("fldenv\t%0" : : "m" (*env));
+  struct knc_x87_state live;
+  __asm__ __volatile__ ("fnsave\t%0" : "=m" (live) : : "memory");
+  __builtin_memcpy (live.words, env, 28);
+  knc_restore_x87 (&live);
   /* Restore every supported MXCSR field, retaining live opaque controls.
      In particular, never load a saved ordinary-x86 exception mask.  */
   knc_update_mxcsr (KNC_FLAGS | KNC_ROUND, env->__mxcsr);
@@ -260,8 +297,12 @@ support_fpu_underflow_control (int kind __attribute__((unused)))
 int
 get_fpu_underflow_mode (void)
 {
-  /* IMCI's observed underflow result is flushed to zero.  There is no
-     supported mixed-domain gradual mode, regardless of the FTZ bit.  */
+  /* The original probe's 2^-126 * 2^-126 rounds to binary32 zero even
+     with gradual underflow; it did not establish flushing.  R27 section
+     4.1 pp.55-56 (verified early KNC specification) distinguishes DAZ
+     inputs from FZ results.  Separate x87/IMCI tiny-result probes are
+     needed for production-card evidence.  Until mixed-domain control is
+     qualified, keep the unsupported API response, not a hardware claim.  */
   return 0;
 }
 
