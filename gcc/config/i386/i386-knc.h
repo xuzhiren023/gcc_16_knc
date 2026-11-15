@@ -92,6 +92,7 @@ extern unsigned int ix86_knc_libcall_result_regno (machine_mode, unsigned int);
 extern bool ix86_knc_output_reload_p (machine_mode, reg_class_t);
 extern bool ix86_knc_reload_memory_bridge_p (machine_mode, reg_class_t, reg_class_t);
 extern rtx ix86_knc_reload_bridge (machine_mode);
+extern bool ix86_knc_cannot_substitute_mem_equiv_p (rtx);
 extern bool ix86_knc_hard_regno_mode_ok (unsigned int, machine_mode);
 extern bool ix86_knc_secondary_reload (bool, rtx, reg_class_t, machine_mode,
 				       struct secondary_reload_info *);

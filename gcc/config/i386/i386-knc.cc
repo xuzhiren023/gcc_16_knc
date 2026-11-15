@@ -1627,6 +1627,18 @@ knc_scalar_transport_mode_p (machine_mode mode)
          || mode == DImode || mode == TImode || mode == TFmode;
 }
 
+/* LRA's get_equiv can replace a bridge pseudo without rechecking its
+   predicate.  Preserve the copy when its equivalent memory does not meet
+   the transport mode's alignment.  Other targets retain the default hook
+   result (ADR-0006).  */
+bool
+ix86_knc_cannot_substitute_mem_equiv_p (rtx subst)
+{
+  return TARGET_KNC && MEM_P (subst)
+         && knc_scalar_transport_mode_p (GET_MODE (subst))
+         && MEM_ALIGN (subst) < GET_MODE_ALIGNMENT (GET_MODE (subst));
+}
+
 /* A bridge created during LRA must start in memory.  In particular, a TI/TF
    pseudo with an unrestricted class can acquire a vector register from the
    ordinary move before the memory-only transfer is processed, recursively

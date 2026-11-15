@@ -418,13 +418,12 @@
   DONE;
 })
 
-;; Bm checks the operand mode's alignment even for these scalar modes.
-;; Keep spill pseudos recognizable, but reject an under-aligned memory
-;; substitution when LRA or a later pass folds away the bridge copy.
+;; Reject under-aligned memory folds before LRA, but keep bridge pseudos
+;; recognizable.  Ba lets LRA copy a register operand to an aligned slot.
 (define_insn "knc_load<mode>"
   [(set (match_operand:KNC_BROADCAST 0 "register_operand" "=YJ")
         (unspec:KNC_BROADCAST
-          [(match_operand:KNC_BROADCAST 1 "nonimmediate_operand" "Bm")]
+          [(match_operand:KNC_BROADCAST 1 "knc_bridge_operand" "Ba")]
           UNSPEC_KNC_TRANSFER))]
   "TARGET_KNC"
   "vbroadcast<knc_load>\t%1, %g0"
@@ -440,7 +439,7 @@
 (define_insn "knc_load_pair<mode>"
   [(set (match_operand:KNC_PAIR 0 "register_operand" "=YJ")
         (unspec:KNC_PAIR
-          [(match_operand:KNC_PAIR 1 "nonimmediate_operand" "m")
+          [(match_operand:KNC_PAIR 1 "knc_bridge_operand" "m")
            (match_operand:HI 2 "register_operand" "YL")]
           UNSPEC_KNC_LOAD_PAIR))]
   "TARGET_KNC"
