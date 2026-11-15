@@ -30,6 +30,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "tm_p.h"
 #include "emit-rtl.h"
 #include "insn-config.h"
+#include "insn-attr.h"
 #include "insn-flags.h"
 #include "recog.h"
 #include "explow.h"
@@ -271,6 +272,37 @@ ix86_knc_tune_features (const gcc_options *opts)
     return;
   ix86_tune_features[X86_TUNE_FAST_PREFIX] = 0;
   ix86_tune_features[X86_TUNE_ALIGN_TIGHT_LOOPS] = 0;
+}
+
+/* S12-31: true if the scheduler should keep CONDGEN directly before the
+   conditional jump CONDJMP.  A compare and its jump issue as one pair, and
+   pairing otherwise needs independent single-cycle instructions (R02 p.56,
+   verified in the source; production or pre-production hardware not stated
+   there).  An x87 instruction issues alone, so one scheduled between the two
+   leaves the jump an issue of its own: lead card 2026-11-15 (exclusive, one
+   core), 44.8 ns per 27-product row, 1.66 ns per iteration.  That a
+   flag-setting add or sub pairs with its jump like a compare is inference;
+   grouping them costs no issue either way.  Blocks without x87 keep the
+   S6-06 rule: a vector instruction may take the compare or the jump as its
+   partner, so the two stay free.  */
+bool
+ix86_knc_macro_fusion_pair_p (rtx_insn *condgen, rtx_insn *condjmp)
+{
+  if (!condgen || !NONJUMP_INSN_P (condgen) || !any_condjump_p (condjmp))
+    return false;
+  rtx flags = gen_rtx_REG (CCmode, FLAGS_REG);
+  if (!reg_referenced_p (flags, PATTERN (condjmp))
+      || !modified_in_p (flags, condgen)
+      || recog_memoized (condgen) < 0
+      || get_attr_knc_pipe (condgen) != KNC_PIPE_SCALAR)
+    return false;
+  rtx_insn *insn;
+  FOR_BB_INSNS (BLOCK_FOR_INSN (condjmp), insn)
+    if (NONDEBUG_INSN_P (insn)
+        && recog_memoized (insn) >= 0
+        && get_attr_knc_pipe (insn) == KNC_PIPE_FP)
+      return true;
+  return false;
 }
 
 /* Costs that need KNC lowering knowledge rather than x86 mode splitting.  */
