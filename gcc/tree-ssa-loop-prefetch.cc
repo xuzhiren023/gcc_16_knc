@@ -50,6 +50,545 @@ along with GCC; see the file COPYING3.  If not see
 #include "dbgcnt.h"
 #include "tree-affine.h"
 #include "builtins.h"
+#include "cfghooks.h"
+#include "cfgloopmanip.h"
+#include "tree-cfg.h"
+#include "alias.h"
+
+/* Bounded indirect prefetch deliberately recognizes a small, structural
+   subset: a counted scalar product reduction, optionally in a counted
+   row loop.  No statement in the original reduction is rewritten.  In
+   particular, product rounding and accumulation order are unchanged.  */
+
+struct indirect_counted_loop
+{
+  class loop *loop;
+  tree iv, start, end;
+  gcond *entry, *exit;
+};
+
+struct indirect_reduction
+{
+  indirect_counted_loop inner, outer;
+  tree indices, values;
+  tree index_type, value_type;
+  tree bounds, pointers;
+  tree bound_ref, pointer_ref;
+  bool nested, per_row;
+};
+
+static gassign *
+indirect_def (tree value)
+{
+  if (TREE_CODE (value) != SSA_NAME || SSA_NAME_IS_DEFAULT_DEF (value))
+    return NULL;
+  return dyn_cast<gassign *> (SSA_NAME_DEF_STMT (value));
+}
+
+/* Only lossless widening conversions are transparent here.  In
+   particular, truncation or signedness changes at the IV's width must
+   not turn a wrapped subscript into a counted, contiguous access.  */
+static tree
+indirect_strip_widening (tree value)
+{
+  for (unsigned depth = 0; depth != 8; ++depth)
+    {
+      gassign *def = indirect_def (value);
+      if (!def || !CONVERT_EXPR_CODE_P (gimple_assign_rhs_code (def)))
+	break;
+      tree arg = gimple_assign_rhs1 (def);
+      if (!INTEGRAL_TYPE_P (TREE_TYPE (value))
+	  || !INTEGRAL_TYPE_P (TREE_TYPE (arg))
+	  || TYPE_PRECISION (TREE_TYPE (value))
+	     <= TYPE_PRECISION (TREE_TYPE (arg)))
+	break;
+      value = arg;
+    }
+  return value;
+}
+
+/* Match (widened IV + OFFSET) * SCALE.  This is address syntax, not a
+   general recurrence solver.  Small constants keep host arithmetic
+   bounded; the emitted arithmetic is separately widened to 64 bits.  */
+static bool
+indirect_offset (tree value, tree iv, HOST_WIDE_INT scale,
+		 HOST_WIDE_INT *offset)
+{
+  value = indirect_strip_widening (value);
+  gassign *def = indirect_def (value);
+  if (scale != 1)
+    {
+      if (!def || gimple_assign_rhs_code (def) != MULT_EXPR
+	  || !tree_fits_shwi_p (gimple_assign_rhs2 (def))
+	  || tree_to_shwi (gimple_assign_rhs2 (def)) != scale)
+	return false;
+      value = indirect_strip_widening (gimple_assign_rhs1 (def));
+      def = indirect_def (value);
+    }
+  *offset = 0;
+  if (value == iv)
+    return true;
+  if (!def || gimple_assign_rhs_code (def) != PLUS_EXPR
+      || indirect_strip_widening (gimple_assign_rhs1 (def)) != iv
+      || !tree_fits_shwi_p (gimple_assign_rhs2 (def)))
+    return false;
+  *offset = tree_to_shwi (gimple_assign_rhs2 (def));
+  return *offset >= 0 && *offset <= 4;
+}
+
+static tree
+indirect_load_ref (tree value)
+{
+  gassign *def = indirect_def (value);
+  if (!def || !gimple_assign_load_p (def) || gimple_has_volatile_ops (def))
+    return NULL_TREE;
+  tree ref = gimple_assign_rhs1 (def);
+  if (TREE_CODE (ref) != MEM_REF || !integer_zerop (TREE_OPERAND (ref, 1)))
+    return NULL_TREE;
+  return ref;
+}
+
+/* VALUE must be exactly BASE[IV + OFFSET], with its natural element
+   stride and no other varying address terms.  */
+static bool
+indirect_array (tree value, tree iv, tree *base, HOST_WIDE_INT *offset)
+{
+  tree ref = indirect_load_ref (value);
+  if (!ref || !tree_fits_shwi_p (TYPE_SIZE_UNIT (TREE_TYPE (value))))
+    return false;
+  HOST_WIDE_INT size = tree_to_shwi (TYPE_SIZE_UNIT (TREE_TYPE (value)));
+  gassign *address = indirect_def (TREE_OPERAND (ref, 0));
+  if (!address || gimple_assign_rhs_code (address) != POINTER_PLUS_EXPR
+      || !indirect_offset (gimple_assign_rhs2 (address), iv, size, offset))
+    return false;
+  *base = gimple_assign_rhs1 (address);
+  return true;
+}
+
+/* Normalize a conditional so CODE/LHS/RHS describe taking edge E.  */
+static bool
+indirect_condition (edge e, enum tree_code *code, tree *lhs, tree *rhs)
+{
+  gimple_stmt_iterator gsi = gsi_last_bb (e->src);
+  if (gsi_end_p (gsi) || gimple_code (gsi_stmt (gsi)) != GIMPLE_COND)
+    return false;
+  gcond *cond = as_a<gcond *> (gsi_stmt (gsi));
+  *code = gimple_cond_code (cond);
+  if (e->flags & EDGE_FALSE_VALUE)
+    *code = invert_tree_comparison (*code, false);
+  else if (!(e->flags & EDGE_TRUE_VALUE))
+    return false;
+  *lhs = gimple_cond_lhs (cond);
+  *rhs = gimple_cond_rhs (cond);
+  if (*code == GT_EXPR || *code == GE_EXPR)
+    {
+      std::swap (*lhs, *rhs);
+      *code = swap_tree_comparison (*code);
+    }
+  return true;
+}
+
+/* The preheader must be reached from START < END, through only
+   single-predecessor, single-successor blocks.  Requiring the actual
+   entry test also proves that a canonical != latch counts upwards to
+   END, rather than wrapping around the integer range.  */
+static gcond *
+indirect_entry (class loop *loop, tree start, tree end)
+{
+  edge e = loop_preheader_edge (loop);
+  for (unsigned depth = 0; depth != 8; ++depth)
+    {
+      enum tree_code code;
+      tree lhs, rhs;
+      if (indirect_condition (e, &code, &lhs, &rhs))
+	{
+	  if (code == LT_EXPR && operand_equal_p (lhs, start, 0)
+	      && operand_equal_p (rhs, end, 0))
+	    return as_a<gcond *> (gsi_stmt (gsi_last_bb (e->src)));
+	  return NULL;
+	}
+      if (!single_pred_p (e->src) || !single_succ_p (e->src)
+	  || e->src == ENTRY_BLOCK_PTR_FOR_FN (cfun))
+	return NULL;
+      e = single_pred_edge (e->src);
+    }
+  return NULL;
+}
+
+static bool
+indirect_counted (class loop *loop, indirect_counted_loop *result)
+{
+  edge exit = single_exit (loop);
+  if (!exit || EDGE_COUNT (exit->src->succs) != 2
+      || !loop->latch || !single_succ_p (loop->latch))
+    return false;
+  edge stay = EDGE_SUCC (exit->src, 0);
+  if (stay == exit)
+    stay = EDGE_SUCC (exit->src, 1);
+  enum tree_code code;
+  tree lhs, rhs;
+  if (!indirect_condition (stay, &code, &lhs, &rhs)
+      || (code != LT_EXPR && code != NE_EXPR))
+    return false;
+  for (gphi_iterator gpi = gsi_start_phis (loop->header);
+       !gsi_end_p (gpi); gsi_next (&gpi))
+    {
+      gphi *phi = gpi.phi ();
+      tree iv = gimple_phi_result (phi), type = TREE_TYPE (iv);
+      if (!INTEGRAL_TYPE_P (type) || TYPE_UNSIGNED (type)
+	  || TYPE_PRECISION (type) != 32 || gimple_phi_num_args (phi) != 2)
+	continue;
+      tree next = PHI_ARG_DEF_FROM_EDGE (phi, loop_latch_edge (loop));
+      gassign *inc = indirect_def (next);
+      if (!inc || gimple_assign_rhs_code (inc) != PLUS_EXPR
+	  || gimple_assign_rhs1 (inc) != iv
+	  || !integer_onep (gimple_assign_rhs2 (inc)))
+	continue;
+      tree end = NULL_TREE;
+      if (lhs == next)
+	end = rhs;
+      else if (code == NE_EXPR && rhs == next)
+	end = lhs;
+      if (!end || !types_compatible_p (type, TREE_TYPE (end))
+	  || !expr_invariant_in_loop_p (loop, end))
+	continue;
+      tree start = PHI_ARG_DEF_FROM_EDGE (phi, loop_preheader_edge (loop));
+      gcond *entry = indirect_entry (loop, start, end);
+      if (!entry)
+	continue;
+      *result = {loop, iv, start, end, entry, get_loop_exit_condition (exit)};
+      return true;
+    }
+  return false;
+}
+
+/* Find an indexed load among the two operands of the product feeding
+   a scalar add recurrence.  No reassociation or FP replacement occurs.  */
+static bool
+indirect_product (indirect_reduction *r)
+{
+  class loop *loop = r->inner.loop;
+  for (gphi_iterator gpi = gsi_start_phis (loop->header);
+       !gsi_end_p (gpi); gsi_next (&gpi))
+    {
+      gphi *phi = gpi.phi ();
+      tree sum = gimple_phi_result (phi);
+      if (TREE_CODE (TREE_TYPE (sum)) != REAL_TYPE
+	  || gimple_phi_num_args (phi) != 2)
+	continue;
+      gassign *add = indirect_def
+	(PHI_ARG_DEF_FROM_EDGE (phi, loop_latch_edge (loop)));
+      if (!add || gimple_assign_rhs_code (add) != PLUS_EXPR)
+	continue;
+      tree product;
+      if (gimple_assign_rhs1 (add) == sum)
+	product = gimple_assign_rhs2 (add);
+      else if (gimple_assign_rhs2 (add) == sum)
+	product = gimple_assign_rhs1 (add);
+      else
+	continue;
+      gassign *mul = indirect_def (product);
+      if (!mul || gimple_assign_rhs_code (mul) != MULT_EXPR)
+	continue;
+      for (unsigned op = 1; op <= 2; ++op)
+	{
+	  tree value = gimple_op (mul, op);
+	  tree ref = indirect_load_ref (value);
+	  if (!ref || TREE_CODE (TREE_TYPE (value)) != REAL_TYPE
+	      || !tree_fits_shwi_p (TYPE_SIZE_UNIT (TREE_TYPE (value))))
+	    continue;
+	  gassign *address = indirect_def (TREE_OPERAND (ref, 0));
+	  if (!address || gimple_assign_rhs_code (address) != POINTER_PLUS_EXPR)
+	    continue;
+	  tree bytes = gimple_assign_rhs2 (address);
+	  gassign *scale = indirect_def (bytes);
+	  if (!scale || gimple_assign_rhs_code (scale) != MULT_EXPR
+	      || !operand_equal_p (gimple_assign_rhs2 (scale),
+				   TYPE_SIZE_UNIT (TREE_TYPE (value)), 0))
+	    continue;
+	  tree index = indirect_strip_widening (gimple_assign_rhs1 (scale));
+	  tree base;
+	  HOST_WIDE_INT offset;
+	  if (!INTEGRAL_TYPE_P (TREE_TYPE (index))
+	      || TYPE_UNSIGNED (TREE_TYPE (index))
+	      || TYPE_PRECISION (TREE_TYPE (index)) != 32
+	      || !indirect_array (index, r->inner.iv, &base, &offset)
+	      || offset != 0 || !expr_invariant_in_loop_p (loop, base)
+	      || !expr_invariant_in_loop_p (loop, gimple_assign_rhs1 (address)))
+	    continue;
+	  r->indices = base;
+	  r->values = gimple_assign_rhs1 (address);
+	  r->index_type = TREE_TYPE (index);
+	  r->value_type = TREE_TYPE (value);
+	  return true;
+	}
+    }
+  return false;
+}
+
+/* No speculative ordinary load may cross a call, volatile access, or
+   early exit.  The inner loop is a straight counted body.  In a nest,
+   the only extra conditional is its empty-row test, which must execute
+   on every outer iteration.  For metadata arrays use conservative type
+   aliasing against the ENTIRE array, not a particular current element:
+   a disjoint row[i] access says nothing about a store to row[i+4].  */
+static bool
+indirect_safe_body (const indirect_reduction &r, bool nested)
+{
+  class loop *nest = nested ? r.outer.loop : r.inner.loop;
+  basic_block *body = get_loop_body (nest);
+  bool safe = true;
+  for (unsigned i = 0; i < nest->num_nodes && safe; ++i)
+    {
+      basic_block bb = body[i];
+      edge e;
+      edge_iterator ei;
+      FOR_EACH_EDGE (e, ei, bb->succs)
+	if (e->flags & (EDGE_ABNORMAL | EDGE_EH))
+	  safe = false;
+      for (gimple_stmt_iterator gsi = gsi_start_bb (bb);
+	   !gsi_end_p (gsi) && safe; gsi_next (&gsi))
+	{
+	  gimple *stmt = gsi_stmt (gsi);
+	  if (is_gimple_debug (stmt) || gimple_code (stmt) == GIMPLE_LABEL
+	      || gimple_code (stmt) == GIMPLE_NOP)
+	    continue;
+	  if (stmt == r.inner.exit
+	      || (nested && (stmt == r.inner.entry || stmt == r.outer.exit)))
+	    continue;
+	  if (!is_gimple_assign (stmt) || gimple_has_volatile_ops (stmt))
+	    {
+	      safe = false;
+	      break;
+	    }
+	  /* All original loads and the product execute on every inner
+	     iteration; a conditional indexed load is not a candidate.  */
+	  if (flow_bb_inside_loop_p (r.inner.loop, bb)
+	      && bb != r.inner.loop->header && bb != r.inner.loop->latch)
+	    safe = false;
+	  if (gimple_store_p (stmt))
+	    {
+	      if (!nested || flow_bb_inside_loop_p (r.inner.loop, bb)
+		  || !flag_strict_aliasing
+		  || alias_sets_conflict_p (get_alias_set (gimple_assign_lhs (stmt)),
+				    get_alias_set (r.bound_ref))
+		  || (r.pointer_ref
+		      && alias_sets_conflict_p
+			   (get_alias_set (gimple_assign_lhs (stmt)),
+			    get_alias_set (r.pointer_ref))))
+		safe = false;
+	    }
+	}
+    }
+  free (body);
+  return safe;
+}
+
+static bool
+indirect_find_reduction (class loop *loop, indirect_reduction *r)
+{
+  *r = {};
+  if (loop->inner || loop->num_nodes > 2
+      || !indirect_counted (loop, &r->inner)
+      || !indirect_product (r) || !indirect_safe_body (*r, false))
+    return false;
+  class loop *outer = loop_outer (loop);
+  if (outer == current_loops->tree_root || outer->inner != loop || loop->next
+      || !indirect_counted (outer, &r->outer)
+      || !integer_zerop (r->outer.start)
+      || !dominated_by_p (CDI_DOMINATORS, outer->latch,
+			  gimple_bb (r->inner.entry)))
+    return true; /* A guarded row-local hint remains legal.  */
+
+  HOST_WIDE_INT begin_offset, end_offset, pointer_offset;
+  tree begin_base, end_base, pointer_base;
+  if (!indirect_array (r->inner.end, r->outer.iv, &end_base, &end_offset)
+      || !expr_invariant_in_loop_p (outer, end_base)
+      || !expr_invariant_in_loop_p (outer, r->values))
+    return true;
+  r->bound_ref = indirect_load_ref (r->inner.end);
+  r->bounds = end_base;
+  if (end_offset == 1
+      && indirect_array (r->inner.start, r->outer.iv, &begin_base, &begin_offset)
+      && begin_offset == 0 && begin_base == end_base
+      && expr_invariant_in_loop_p (outer, r->indices))
+    r->per_row = false;
+  else if (end_offset == 0 && integer_zerop (r->inner.start)
+	   && indirect_array (r->indices, r->outer.iv,
+			      &pointer_base, &pointer_offset)
+	   && pointer_offset == 0
+	   && expr_invariant_in_loop_p (outer, pointer_base))
+    {
+      r->per_row = true;
+      r->pointers = pointer_base;
+      r->pointer_ref = indirect_load_ref (r->indices);
+    }
+  else
+    return true;
+  r->nested = indirect_safe_body (*r, true);
+  return true;
+}
+
+static tree
+indirect_append (basic_block bb, tree expression)
+{
+  gimple_seq seq = NULL;
+  tree result = force_gimple_operand (unshare_expr (expression), &seq,
+				     true, NULL_TREE);
+  gimple_stmt_iterator gsi = gsi_last_bb (bb);
+  gsi_insert_seq_after (&gsi, seq, GSI_NEW_STMT);
+  return result;
+}
+
+/* BB ends in an unconditional edge to the original reduction body.
+   Insert a diamond, returning its true arm.  A false edge skips ALL
+   subsequent speculation.  No original PHI or computation is moved
+   into the guarded arm.  */
+static basic_block
+indirect_guard (basic_block bb, enum tree_code code, tree lhs, tree rhs)
+{
+  basic_block join = single_succ (bb);
+  basic_block dom = get_immediate_dominator (CDI_DOMINATORS, join);
+  basic_block yes = split_edge (single_succ_edge (bb));
+  edge taken = single_succ_edge (bb);
+  taken->flags = EDGE_TRUE_VALUE;
+  taken->probability = profile_probability::likely ();
+  edge skipped = make_edge (bb, join, EDGE_FALSE_VALUE);
+  skipped->probability = taken->probability.invert ();
+  yes->count = bb->count.apply_probability (taken->probability);
+  set_immediate_dominator (CDI_DOMINATORS, join, dom);
+  lhs = indirect_append (bb, lhs);
+  rhs = indirect_append (bb, rhs);
+  gcond *cond = gimple_build_cond (code, lhs, rhs, NULL_TREE, NULL_TREE);
+  gimple_stmt_iterator gsi = gsi_last_bb (bb);
+  gsi_insert_after (&gsi, cond, GSI_NEW_STMT);
+  return yes;
+}
+
+static tree
+indirect_address (tree base, tree index, tree element_type)
+{
+  tree bytes = fold_build2 (MULT_EXPR, sizetype, fold_convert (sizetype, index),
+			   fold_convert (sizetype, TYPE_SIZE_UNIT (element_type)));
+  return fold_build2 (POINTER_PLUS_EXPR, TREE_TYPE (base), base, bytes);
+}
+
+static tree
+indirect_load (basic_block bb, tree base, tree index, tree type)
+{
+  tree address = indirect_append (bb, indirect_address (base, index, type));
+  tree ref = build2 (MEM_REF, type, address,
+		     build_int_cst (TREE_TYPE (address), 0));
+  return indirect_append (bb, ref);
+}
+
+static bool
+indirect_version_nest (const indirect_reduction &r, unsigned min_rows)
+{
+  /* As in version_loop_on_niter, scale the count to avoid advertising
+     a new IV bound in the unchanged arm.  The outer entry proves a
+     positive signed-32 count, so this wide product cannot wrap.  */
+  tree type = long_long_unsigned_type_node;
+  tree count = fold_build2 (MULT_EXPR, type, fold_convert (type, r.outer.end),
+			   build_int_cst (type, 8));
+  tree cond = fold_build2 (GE_EXPR, boolean_type_node, count,
+			  build_int_cst (type, (unsigned HOST_WIDE_INT) min_rows * 8));
+  if (integer_zerop (cond))
+    return false;
+  if (integer_nonzerop (cond))
+    return true;
+  gimple_seq seq = NULL;
+  cond = force_gimple_operand_1 (cond, &seq, is_gimple_condexpr_for_cond, NULL_TREE);
+  if (seq)
+    gsi_insert_seq_on_edge_immediate (loop_preheader_edge (r.outer.loop), seq);
+  profile_probability likely = profile_probability::likely ();
+  class loop *copy = loop_version (r.outer.loop, cond, NULL, likely,
+				  likely.invert (), likely, likely.invert (), true);
+  if (!copy)
+    return false;
+  update_ssa (TODO_update_ssa_no_phi);
+  return true;
+}
+
+static void
+indirect_emit (const indirect_reduction &r, unsigned distance, unsigned ahead)
+{
+  basic_block bb = r.inner.loop->header;
+  split_block_after_labels (bb);
+  tree wide = long_long_integer_type_node;
+  tree index = fold_convert (wide, r.inner.iv);
+  tree bound = r.inner.end;
+  tree indices = r.indices;
+  if (r.nested)
+    {
+      /* Subtract in a wider signed type: neither the row guard nor the
+	 in-row lookahead may overflow for INT_MIN/INT_MAX endpoints.  */
+      unsigned rows_ahead = r.per_row ? 1 : ahead;
+      tree remaining = fold_build2 (MINUS_EXPR, wide,
+		fold_convert (wide, r.outer.end), fold_convert (wide, r.outer.iv));
+      bb = indirect_guard (bb, GT_EXPR, remaining,
+			   build_int_cst (wide, rows_ahead));
+      tree future_row = fold_build2 (PLUS_EXPR, wide,
+		fold_convert (wide, r.outer.iv),
+		build_int_cst (wide, r.per_row ? 1 : ahead + 1));
+      bound = indirect_load (bb, r.bounds, future_row, TREE_TYPE (r.inner.end));
+      if (r.per_row)
+	{
+	  /* Zero/negative count: no pointer or index load.  This matters
+	     for empty future rows whose pointers need not be valid.  */
+	  bb = indirect_guard (bb, LT_EXPR, r.inner.iv, bound);
+	  indices = indirect_load (bb, r.pointers, future_row,
+				   TREE_TYPE (r.indices));
+	}
+    }
+  if (!r.nested || !r.per_row)
+    {
+      tree remaining = fold_build2 (MINUS_EXPR, wide,
+				    fold_convert (wide, bound), index);
+      bb = indirect_guard (bb, GT_EXPR, remaining, build_int_cst (wide, distance));
+      index = fold_build2 (PLUS_EXPR, wide, index, build_int_cst (wide, distance));
+    }
+  tree column = indirect_load (bb, indices, index, r.index_type);
+  tree addr = indirect_append (bb, indirect_address (r.values, column, r.value_type));
+  gcall *hint = gimple_build_call (builtin_decl_explicit (BUILT_IN_PREFETCH),
+				 3, addr, integer_zero_node, build_int_cst (integer_type_node, 3));
+  gimple_stmt_iterator gsi = gsi_last_bb (bb);
+  gsi_insert_after (&gsi, hint, GSI_NEW_STMT);
+}
+
+static bool
+prefetch_indirect_reductions ()
+{
+  unsigned distance, ahead, min_rows;
+  if (flag_non_call_exceptions || flag_trapv || !targetm.indirect_prefetch_policy
+      || !targetm.indirect_prefetch_policy (&distance, &ahead, &min_rows)
+      || !distance || distance > 4096 || !ahead || ahead > 3
+      || !min_rows || min_rows > INT_MAX)
+    return false;
+  bool changed = false;
+  /* Snapshot before versioning: copies must never be reconsidered.  */
+  auto_vec<loop_p> candidates;
+  for (auto loop : loops_list (cfun, LI_ONLY_INNERMOST))
+    candidates.safe_push (loop);
+  for (auto loop : candidates)
+    {
+      indirect_reduction r;
+      if (!indirect_find_reduction (loop, &r)
+	  || (r.nested && !indirect_version_nest (r, min_rows)))
+	continue;
+      indirect_emit (r, distance, ahead);
+      mark_virtual_operands_for_renaming (cfun);
+      update_ssa (TODO_update_ssa);
+      rewrite_into_loop_closed_ssa (NULL, TODO_update_ssa_only_virtuals);
+      scev_reset ();
+      changed = true;
+      if (dump_file)
+	fprintf (dump_file, "Bounded indirect prefetch in loop %d: %s\n",
+		 loop->num, r.nested ? (r.per_row ? "next-row pointers" : "future row bound")
+		 : "row-local bound");
+    }
+  return changed;
+}
 
 /* This pass inserts prefetch instructions to optimize cache usage during
    accesses to arrays in loops.  It processes loops sequentially and:
@@ -2454,6 +2993,9 @@ tree_ssa_prefetch_arrays (void)
       DECL_IS_NOVOPS (decl) = true;
       set_builtin_decl (BUILT_IN_PREFETCH, decl, false);
     }
+
+  if (prefetch_indirect_reductions ())
+    todo_flags |= TODO_cleanup_cfg;
 
   for (auto loop : loops_list (cfun, LI_FROM_INNERMOST))
     {
