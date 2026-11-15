@@ -65,6 +65,9 @@ struct indirect_counted_loop
   class loop *loop;
   tree iv, start, end;
   gcond *entry, *exit;
+  /* An ascending loop covers [START, END).  A descending one covers
+     [END, START], and may lack an entry test.  */
+  bool down;
 };
 
 struct indirect_reduction
@@ -74,6 +77,12 @@ struct indirect_reduction
   tree index_type, value_type;
   tree bounds, pointers;
   tree bound_ref, pointer_ref;
+  /* Element type of BOUNDS; the inner end may be a widening of it.  */
+  tree bound_type;
+  /* Outer-body stores BASE[outer iv] that only a byte-typed BOUNDS
+     can alias; the nest version test proves them disjoint.  */
+  tree stores[2], store_types[2];
+  unsigned n_stores;
   bool nested, per_row;
 };
 
@@ -148,21 +157,28 @@ indirect_load_ref (tree value)
   return ref;
 }
 
-/* VALUE must be exactly BASE[IV + OFFSET], with its natural element
+/* REF must be exactly BASE[IV + OFFSET], with its natural element
    stride and no other varying address terms.  */
 static bool
-indirect_array (tree value, tree iv, tree *base, HOST_WIDE_INT *offset)
+indirect_array_ref (tree ref, tree iv, tree *base, HOST_WIDE_INT *offset)
 {
-  tree ref = indirect_load_ref (value);
-  if (!ref || !tree_fits_shwi_p (TYPE_SIZE_UNIT (TREE_TYPE (value))))
+  if (!ref || TREE_CODE (ref) != MEM_REF
+      || !integer_zerop (TREE_OPERAND (ref, 1))
+      || !tree_fits_shwi_p (TYPE_SIZE_UNIT (TREE_TYPE (ref))))
     return false;
-  HOST_WIDE_INT size = tree_to_shwi (TYPE_SIZE_UNIT (TREE_TYPE (value)));
+  HOST_WIDE_INT size = tree_to_shwi (TYPE_SIZE_UNIT (TREE_TYPE (ref)));
   gassign *address = indirect_def (TREE_OPERAND (ref, 0));
   if (!address || gimple_assign_rhs_code (address) != POINTER_PLUS_EXPR
       || !indirect_offset (gimple_assign_rhs2 (address), iv, size, offset))
     return false;
   *base = gimple_assign_rhs1 (address);
   return true;
+}
+
+static bool
+indirect_array (tree value, tree iv, tree *base, HOST_WIDE_INT *offset)
+{
+  return indirect_array_ref (indirect_load_ref (value), iv, base, offset);
 }
 
 /* Normalize a conditional so CODE/LHS/RHS describe taking edge E.  */
@@ -228,7 +244,7 @@ indirect_counted (class loop *loop, indirect_counted_loop *result)
   enum tree_code code;
   tree lhs, rhs;
   if (!indirect_condition (stay, &code, &lhs, &rhs)
-      || (code != LT_EXPR && code != NE_EXPR))
+      || (code != LT_EXPR && code != NE_EXPR && code != LE_EXPR))
     return false;
   for (gphi_iterator gpi = gsi_start_phis (loop->header);
        !gsi_end_p (gpi); gsi_next (&gpi))
@@ -241,11 +257,22 @@ indirect_counted (class loop *loop, indirect_counted_loop *result)
       tree next = PHI_ARG_DEF_FROM_EDGE (phi, loop_latch_edge (loop));
       gassign *inc = indirect_def (next);
       if (!inc || gimple_assign_rhs_code (inc) != PLUS_EXPR
-	  || gimple_assign_rhs1 (inc) != iv
-	  || !integer_onep (gimple_assign_rhs2 (inc)))
+	  || gimple_assign_rhs1 (inc) != iv)
+	continue;
+      bool down = integer_minus_onep (gimple_assign_rhs2 (inc));
+      if (!down && !integer_onep (gimple_assign_rhs2 (inc)))
 	continue;
       tree end = NULL_TREE;
-      if (lhs == next)
+      if (down)
+	{
+	  /* Only END <= next: the body runs at START, then at each lower
+	     value down to END.  That needs no entry test, because a
+	     relational latch cannot wrap; the lookahead guard separately
+	     proves that the row below is one this loop still executes.  */
+	  if (code == LE_EXPR && rhs == next)
+	    end = lhs;
+	}
+      else if (code != LE_EXPR && lhs == next)
 	end = rhs;
       else if (code == NE_EXPR && rhs == next)
 	end = lhs;
@@ -253,17 +280,19 @@ indirect_counted (class loop *loop, indirect_counted_loop *result)
 	  || !expr_invariant_in_loop_p (loop, end))
 	continue;
       tree start = PHI_ARG_DEF_FROM_EDGE (phi, loop_preheader_edge (loop));
-      gcond *entry = indirect_entry (loop, start, end);
-      if (!entry)
+      gcond *entry = down ? NULL : indirect_entry (loop, start, end);
+      if (!entry && !down)
 	continue;
-      *result = {loop, iv, start, end, entry, get_loop_exit_condition (exit)};
+      *result = {loop, iv, start, end, entry, get_loop_exit_condition (exit),
+		 down};
       return true;
     }
   return false;
 }
 
 /* Find an indexed load among the two operands of the product feeding
-   a scalar add recurrence.  No reassociation or FP replacement occurs.  */
+   a scalar add recurrence, or a subtract recurrence in the one form
+   sum - product.  No reassociation or FP replacement occurs.  */
 static bool
 indirect_product (indirect_reduction *r)
 {
@@ -278,12 +307,14 @@ indirect_product (indirect_reduction *r)
 	continue;
       gassign *add = indirect_def
 	(PHI_ARG_DEF_FROM_EDGE (phi, loop_latch_edge (loop)));
-      if (!add || gimple_assign_rhs_code (add) != PLUS_EXPR)
+      if (!add || (gimple_assign_rhs_code (add) != PLUS_EXPR
+		   && gimple_assign_rhs_code (add) != MINUS_EXPR))
 	continue;
       tree product;
       if (gimple_assign_rhs1 (add) == sum)
 	product = gimple_assign_rhs2 (add);
-      else if (gimple_assign_rhs2 (add) == sum)
+      else if (gimple_assign_rhs_code (add) == PLUS_EXPR
+	       && gimple_assign_rhs2 (add) == sum)
 	product = gimple_assign_rhs1 (add);
       else
 	continue;
@@ -331,9 +362,12 @@ indirect_product (indirect_reduction *r)
    the only extra conditional is its empty-row test, which must execute
    on every outer iteration.  For metadata arrays use conservative type
    aliasing against the ENTIRE array, not a particular current element:
-   a disjoint row[i] access says nothing about a store to row[i+4].  */
+   a disjoint row[i] access says nothing about a store to row[i+4].
+   A byte-typed bound array conflicts with every store by type alone;
+   an outer-body store BASE[outer iv] is then recorded in R, for the
+   nest version test to prove its whole range disjoint at run time.  */
 static bool
-indirect_safe_body (const indirect_reduction &r, bool nested)
+indirect_safe_body (indirect_reduction &r, bool nested)
 {
   class loop *nest = nested ? r.outer.loop : r.inner.loop;
   basic_block *body = get_loop_body (nest);
@@ -368,15 +402,31 @@ indirect_safe_body (const indirect_reduction &r, bool nested)
 	    safe = false;
 	  if (gimple_store_p (stmt))
 	    {
+	      tree lhs = gimple_assign_lhs (stmt);
 	      if (!nested || flow_bb_inside_loop_p (r.inner.loop, bb)
 		  || !flag_strict_aliasing
-		  || alias_sets_conflict_p (get_alias_set (gimple_assign_lhs (stmt)),
-				    get_alias_set (r.bound_ref))
 		  || (r.pointer_ref
-		      && alias_sets_conflict_p
-			   (get_alias_set (gimple_assign_lhs (stmt)),
-			    get_alias_set (r.pointer_ref))))
+		      && alias_sets_conflict_p (get_alias_set (lhs),
+						get_alias_set (r.pointer_ref))))
 		safe = false;
+	      else if (alias_sets_conflict_p (get_alias_set (lhs),
+					      get_alias_set (r.bound_ref)))
+		{
+		  tree base;
+		  HOST_WIDE_INT offset;
+		  if (get_alias_set (r.bound_ref) != 0
+		      || get_alias_set (lhs) == 0
+		      || r.n_stores == ARRAY_SIZE (r.stores)
+		      || !indirect_array_ref (lhs, r.outer.iv, &base, &offset)
+		      || offset != 0
+		      || !expr_invariant_in_loop_p (r.outer.loop, base))
+		    safe = false;
+		  else
+		    {
+		      r.stores[r.n_stores] = base;
+		      r.store_types[r.n_stores++] = TREE_TYPE (lhs);
+		    }
+		}
 	    }
 	}
     }
@@ -389,26 +439,38 @@ indirect_find_reduction (class loop *loop, indirect_reduction *r)
 {
   *r = {};
   if (loop->inner || loop->num_nodes > 2
-      || !indirect_counted (loop, &r->inner)
+      || !indirect_counted (loop, &r->inner) || r->inner.down
       || !indirect_product (r) || !indirect_safe_body (*r, false))
     return false;
+  /* The outer loop may start anywhere (an outlined worker's interval)
+     and may descend; every lookahead is bounded by its own limits.  */
   class loop *outer = loop_outer (loop);
   if (outer == current_loops->tree_root || outer->inner != loop || loop->next
       || !indirect_counted (outer, &r->outer)
-      || !integer_zerop (r->outer.start)
       || !dominated_by_p (CDI_DOMINATORS, outer->latch,
 			  gimple_bb (r->inner.entry)))
     return true; /* A guarded row-local hint remains legal.  */
 
+  /* A per-row count may be a narrower array element, widened once
+     (a byte per row); the emitted load repeats that one conversion.  */
+  tree end = r->inner.end;
+  gassign *widen = indirect_def (end);
+  if (widen && CONVERT_EXPR_CODE_P (gimple_assign_rhs_code (widen))
+      && INTEGRAL_TYPE_P (TREE_TYPE (gimple_assign_rhs1 (widen)))
+      && (TYPE_PRECISION (TREE_TYPE (gimple_assign_rhs1 (widen)))
+	  < TYPE_PRECISION (TREE_TYPE (end))))
+    end = gimple_assign_rhs1 (widen);
+
   HOST_WIDE_INT begin_offset, end_offset, pointer_offset;
   tree begin_base, end_base, pointer_base;
-  if (!indirect_array (r->inner.end, r->outer.iv, &end_base, &end_offset)
+  if (!indirect_array (end, r->outer.iv, &end_base, &end_offset)
       || !expr_invariant_in_loop_p (outer, end_base)
       || !expr_invariant_in_loop_p (outer, r->values))
     return true;
-  r->bound_ref = indirect_load_ref (r->inner.end);
+  r->bound_ref = indirect_load_ref (end);
+  r->bound_type = TREE_TYPE (end);
   r->bounds = end_base;
-  if (end_offset == 1
+  if (end_offset == 1 && end == r->inner.end && !r->outer.down
       && indirect_array (r->inner.start, r->outer.iv, &begin_base, &begin_offset)
       && begin_offset == 0 && begin_base == end_base
       && expr_invariant_in_loop_p (outer, r->indices))
@@ -505,6 +567,16 @@ indirect_version_loop (class loop *loop, tree cond)
   return true;
 }
 
+/* The address of BASE[INDEX] as an integer, for range tests only.  */
+static tree
+indirect_limit (tree base, tree index, tree element_type)
+{
+  tree type = pointer_sized_int_node;
+  tree bytes = fold_build2 (MULT_EXPR, type, fold_convert (type, index),
+			    fold_convert (type, TYPE_SIZE_UNIT (element_type)));
+  return fold_build2 (PLUS_EXPR, type, fold_convert (type, base), bytes);
+}
+
 static bool
 indirect_version_policy (const indirect_reduction &r, unsigned min_count)
 {
@@ -512,17 +584,44 @@ indirect_version_policy (const indirect_reduction &r, unsigned min_count)
   /* The entry test proves end > start.  Widen before subtraction so a
      signed-32 interval crossing zero cannot overflow.  As in
      version_loop_on_niter, scale the count to avoid advertising a new
-     IV bound in the unchanged arm.  */
+     IV bound in the unchanged arm.  [LOW, HIGH) is the set of rows.  */
   tree wide = long_long_integer_type_node;
-  tree span = fold_build2 (MINUS_EXPR, wide,
-			  fold_convert (wide, counted.end),
-			  fold_convert (wide, counted.start));
+  tree low = fold_convert (wide, counted.down ? counted.end : counted.start);
+  tree high = fold_convert (wide, counted.down ? counted.start : counted.end);
+  if (counted.down)
+    high = fold_build2 (PLUS_EXPR, wide, high, build_one_cst (wide));
+  tree span = fold_build2 (MINUS_EXPR, wide, high, low);
   tree type = long_long_unsigned_type_node;
   tree count = fold_build2 (MULT_EXPR, type, fold_convert (type, span),
 			   build_int_cst (type, 8));
   tree cond = fold_build2 (GE_EXPR, boolean_type_node, count,
 			  build_int_cst (type,
 				 (unsigned HOST_WIDE_INT) min_count * 8));
+  /* A descending loop has no entry test: an empty interval must not
+     wrap into a large unsigned count.  */
+  if (counted.down)
+    cond = fold_build2 (TRUTH_AND_EXPR, boolean_type_node,
+			fold_build2 (GT_EXPR, boolean_type_node, high, low),
+			cond);
+  /* Every recorded store writes BASE[row] for rows in [LOW, HIGH) only,
+     and every speculative bound load reads BOUNDS[row] in that interval.
+     Hint only when the two byte ranges are disjoint, so that a later
+     row's bound is the value its own iteration will read.  */
+  if (r.nested)
+    for (unsigned i = 0; i < r.n_stores; ++i)
+      {
+	tree before = fold_build2
+	  (LE_EXPR, boolean_type_node,
+	   indirect_limit (r.bounds, high, r.bound_type),
+	   indirect_limit (r.stores[i], low, r.store_types[i]));
+	tree after = fold_build2
+	  (LE_EXPR, boolean_type_node,
+	   indirect_limit (r.stores[i], high, r.store_types[i]),
+	   indirect_limit (r.bounds, low, r.bound_type));
+	cond = fold_build2 (TRUTH_AND_EXPR, boolean_type_node, cond,
+			    fold_build2 (TRUTH_OR_EXPR, boolean_type_node,
+					 before, after));
+      }
   return indirect_version_loop (counted.loop, cond);
 }
 
@@ -540,17 +639,29 @@ indirect_emit (const indirect_reduction &r, unsigned distance, unsigned ahead)
 	 and only when the future row exists.  The false copies retain the
 	 original reduction and need no sentinel bound or pointer PHI.  */
       unsigned rows_ahead = r.per_row ? 1 : ahead;
+      tree row = fold_convert (wide, r.outer.iv);
       tree remaining = fold_build2 (MINUS_EXPR, wide,
-		fold_convert (wide, r.outer.end), fold_convert (wide, r.outer.iv));
+				    fold_convert (wide, r.outer.end), row);
       tree cond = fold_build2 (GT_EXPR, boolean_type_node, remaining,
 			      build_int_cst (wide, rows_ahead));
+      tree future_row = fold_build2 (PLUS_EXPR, wide, row,
+		build_int_cst (wide, r.per_row ? 1 : ahead + 1));
+      if (r.outer.down)
+	{
+	  /* Only the per-row form descends.  Its next row is the one
+	     below, which exists while row - 1 >= the inclusive END.  */
+	  gcc_assert (r.per_row);
+	  future_row = fold_build2 (MINUS_EXPR, wide, row,
+				    build_one_cst (wide));
+	  cond = fold_build2 (GE_EXPR, boolean_type_node, future_row,
+			      fold_convert (wide, r.outer.end));
+	}
       if (!indirect_version_loop (r.inner.loop, cond))
 	return false;
       basic_block setup = split_edge (loop_preheader_edge (r.inner.loop));
-      tree future_row = fold_build2 (PLUS_EXPR, wide,
-		fold_convert (wide, r.outer.iv),
-		build_int_cst (wide, r.per_row ? 1 : ahead + 1));
-      bound = indirect_load (setup, r.bounds, future_row, TREE_TYPE (r.inner.end));
+      bound = indirect_load (setup, r.bounds, future_row, r.bound_type);
+      bound = indirect_append (setup, fold_convert (TREE_TYPE (r.inner.end),
+						    bound));
       if (r.per_row)
 	{
 	  /* An empty future row need not have an initialized pointer.
