@@ -155,7 +155,10 @@ knc_processor_costs (unsigned chains)
       2, 2, 2,                /* CH vector issue; narrow modes share ZMM.  */
       {2, 2, 2, 2, 2}, {2, 2, 2, 2, 2}, /* CH masked_load/store.rt.  */
       24, 24,                 /* E: dependent memory bridge, CH latency 12.  */
-      1, 1,                   /* CH kmov.rt: half cycle per core.  */
+      6, 6,                   /* E: GPR/mask transfers, as in generic tuning.
+                                 Keep scalar values in GPRs: these moves must
+                                 cost more than a GPR move (2) or spill (4).
+                                 See S14-16, m4-bzip2-diagnosis.md.  */
       {2, 2, 2}, {2, 2, 2},    /* E: mask memory access like scalar L1.  */
       1                       /* CH kmov.rt.  */
     },
