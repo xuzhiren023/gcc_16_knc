@@ -256,22 +256,18 @@ ix86_knc_tune_cost (const gcc_options *opts, const processor_costs *fallback)
      at 1 or 2 threads, ceil(4/3) at 3, and one chain at 4.  */
   /* Keep each option combination at a stable address when restoring
      per-function optimization options.  */
-  struct cost_table
-  {
-    processor_costs costs[8][2];
-
-    cost_table ()
-    {
-      for (int cost = 1; cost <= 8; ++cost)
-        {
-          costs[cost - 1][0] = knc_processor_costs (1, cost);
-          costs[cost - 1][1] = knc_processor_costs (2, cost);
-        }
-    }
+  static const processor_costs table[8][2] = {
+    { knc_processor_costs (1, 1), knc_processor_costs (2, 1) },
+    { knc_processor_costs (1, 2), knc_processor_costs (2, 2) },
+    { knc_processor_costs (1, 3), knc_processor_costs (2, 3) },
+    { knc_processor_costs (1, 4), knc_processor_costs (2, 4) },
+    { knc_processor_costs (1, 5), knc_processor_costs (2, 5) },
+    { knc_processor_costs (1, 6), knc_processor_costs (2, 6) },
+    { knc_processor_costs (1, 7), knc_processor_costs (2, 7) },
+    { knc_processor_costs (1, 8), knc_processor_costs (2, 8) }
   };
-  static const cost_table table;
-  return &table.costs[opts->x_knc_mask_gpr_move_cost - 1]
-                     [opts->x_knc_threads_per_core == 4 ? 0 : 1];
+  return &table[opts->x_knc_mask_gpr_move_cost - 1]
+               [opts->x_knc_threads_per_core == 4 ? 0 : 1];
 }
 
 /* S8-08 (E5-12, ADR-0009 amendment 1 point 6): -mtune=knc starts from the
