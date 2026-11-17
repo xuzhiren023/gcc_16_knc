@@ -4263,8 +4263,15 @@ vect_analyze_slp_reduc_chain (loop_vec_info vinfo,
       first = false;
     }
   while (!is_a <gphi *> (STMT_VINFO_STMT (next_stmt)));
-  if (fail)
-    return false;
+  /* Pattern recognition can fold a reduction path of conversions into a
+     single no-op conversion.  After skipping that conversion there is no
+     reduction operation to build a chain from.  Let ordinary SLP discovery
+     handle this case.  */
+  if (fail || scalar_stmts.is_empty ())
+    {
+      scalar_stmts.release ();
+      return false;
+    }
 
   /* Remember a stmt with the actual reduction operation.  */
   stmt_vec_info reduc_scalar_stmt = scalar_stmts[0];
