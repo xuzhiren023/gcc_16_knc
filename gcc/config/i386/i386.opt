@@ -1401,6 +1401,10 @@ Support AVX512BMM built-in functions and code generation.
 Target Joined UInteger Var(knc_threads_per_core) Init(4) IntegerRange(1, 4) Param Optimization
 Assumed active KNC threads per core for latency hiding (1 to 4, default 4).
 
+-param=knc-mask-gpr-move-cost=
+Target Joined UInteger Var(knc_mask_gpr_move_cost) Init(4) IntegerRange(1, 8) Param Optimization
+KNC register allocation cost of a move between mask and general-purpose registers (1 to 8, default 4).
+
 -param=knc-prefetch-l1-distance=
 Target Joined UInteger Var(knc_prefetch_l1_distance) Init(16) IntegerRange(1, 4096) Param Optimization
 KNC L1 software prefetch distance in cache lines (default 16; halved when distance x streams x threads per core exceeds a quarter of L1; kept below the L2 distance).
