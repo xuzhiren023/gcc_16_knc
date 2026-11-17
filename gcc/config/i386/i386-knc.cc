@@ -144,7 +144,7 @@ static stringop_algs knc_stringops[2] = {
 }; /* E: no measured stringop crossover; keep size-independent libc calls.  */
 
 static processor_costs
-knc_processor_costs (unsigned chains)
+knc_processor_costs (unsigned chains, int mask_gpr_move_cost)
 {
   return {
     {
@@ -155,11 +155,11 @@ knc_processor_costs (unsigned chains)
       2, 2, 2,                /* CH vector issue; narrow modes share ZMM.  */
       {2, 2, 2, 2, 2}, {2, 2, 2, 2, 2}, /* CH masked_load/store.rt.  */
       24, 24,                 /* E: dependent memory bridge, CH latency 12.  */
-      4, 4,                   /* E: GPR/mask transfers, equal to a spill (4)
-				 and above a GPR move (2).  A cost of 6 loses
-				 the QI mask allocation in S6-14; a mode split
-				 cannot distinguish QI flags from byte values.
-				 See S14-16, m4-bzip2-diagnosis.md.  */
+      mask_gpr_move_cost, mask_gpr_move_cost,
+                              /* E: default 4 equals a spill and exceeds a
+                                 GPR move (2).  Cost 1 retains S6-14's reload
+                                 coverage; QI flags and byte values share a
+                                 mode.  See S14-16, m4-bzip2-diagnosis.md.  */
       {2, 2, 2}, {2, 2, 2},    /* E: mask memory access like scalar L1.  */
       1                       /* CH kmov.rt.  */
     },
@@ -254,9 +254,24 @@ ix86_knc_tune_cost (const gcc_options *opts, const processor_costs *fallback)
     return fallback;
   /* CH point 1: one thread issues every other cycle.  Two chains suffice
      at 1 or 2 threads, ceil(4/3) at 3, and one chain at 4.  */
-  static const processor_costs four_threads = knc_processor_costs (1);
-  static const processor_costs fewer_threads = knc_processor_costs (2);
-  return opts->x_knc_threads_per_core == 4 ? &four_threads : &fewer_threads;
+  /* Keep each option combination at a stable address when restoring
+     per-function optimization options.  */
+  struct cost_table
+  {
+    processor_costs costs[8][2];
+
+    cost_table ()
+    {
+      for (int cost = 1; cost <= 8; ++cost)
+        {
+          costs[cost - 1][0] = knc_processor_costs (1, cost);
+          costs[cost - 1][1] = knc_processor_costs (2, cost);
+        }
+    }
+  };
+  static const cost_table table;
+  return &table.costs[opts->x_knc_mask_gpr_move_cost - 1]
+                     [opts->x_knc_threads_per_core == 4 ? 0 : 1];
 }
 
 /* S8-08 (E5-12, ADR-0009 amendment 1 point 6): -mtune=knc starts from the
